@@ -93,7 +93,9 @@ isort .
 
 ### Running Tests
 
-The project uses pytest for testing. To run the tests:
+#### Locally
+
+The project uses pytest for testing. To run the tests locally:
 
 ```bash
 # Run all tests
@@ -105,6 +107,26 @@ pytest --cov=pycalista_ista
 # Run specific test file
 pytest tests/test_parser.py
 ```
+
+#### GitHub Actions
+
+You can also run tests through GitHub Actions:
+
+1. Go to the [Actions tab](https://github.com/herruzo99/pycalista-ista/actions) in the repository
+2. Select the "Test" workflow
+3. Click "Run workflow"
+4. Optional: Enable debug logging for verbose output
+5. Click "Run workflow" to start the tests
+
+The workflow will:
+- Check code formatting (black, isort)
+- Run all tests with coverage
+- Upload coverage report to Codecov
+
+This is useful for:
+- Verifying the current state of the codebase
+- Testing in a clean environment
+- Generating coverage reports
 
 ## Contributing
 
