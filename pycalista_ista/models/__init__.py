@@ -1,1 +1,30 @@
-"""Models of pycalista_ista."""
+"""Models for the PyCalistaIsta package.
+
+This module provides the data models used throughout the package to represent
+different types of utility meters and their readings. The models include:
+
+- Device: Base class for all meter types
+- WaterDevice: Base class for water meters
+- HotWaterDevice: Hot water meter implementation
+- ColdWaterDevice: Cold water meter implementation
+- HeatingDevice: Heating meter implementation
+- Reading: Individual meter reading with timestamp
+"""
+
+from __future__ import annotations
+
+from .device import Device
+from .water_device import WaterDevice
+from .hot_water_device import HotWaterDevice
+from .cold_water_device import ColdWaterDevice
+from .heating_device import HeatingDevice
+from .reading import Reading
+
+__all__ = [
+    "Device",
+    "WaterDevice",
+    "HotWaterDevice",
+    "ColdWaterDevice",
+    "HeatingDevice",
+    "Reading",
+]

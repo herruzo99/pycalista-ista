@@ -50,6 +50,12 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+test*.*
+test/
+# unignore unittests and related data files
+!tests/*.py
+!tests/*/*.ambr
+!tests/*/*.json
 
 # Translations
 *.mo
@@ -103,14 +109,13 @@ celerybeat.pid
 
 # Environments
 .env
-.venv
+.venv*
 .vscode
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
-.venv*/
 
 # Spyder project settings
 .spyderproject
@@ -129,8 +134,17 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-*.txt
-*test*
 
-# Dev Files
-codiga.*
+# Database
+*.db
+
+# Documents
+*.pdf
+
+# Dev tools
+*.lock
+*.toml
+*nl*
+*.pem
+legende.*
+*.asc

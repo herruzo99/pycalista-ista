@@ -1,60 +1,111 @@
+"""Base device model for Ista Calista meters.
+
+This module provides the base Device class that represents any type of
+utility meter in the Ista Calista system. It handles basic functionality
+like storing readings and calculating consumption.
+"""
+
+from __future__ import annotations
+
 from bisect import insort
 from datetime import datetime
 import logging
-from typing import Optional
+from typing import Final, Optional
 
 from .reading import Reading
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER: Final = logging.getLogger(__name__)
 
 
 class Device:
-    """Base class for devices."""
+    """Base class for Ista Calista utility meters.
+    
+    This class provides core functionality for all meter types,
+    including reading storage, consumption calculation, and history tracking.
+    
+    Attributes:
+        serial_number: Unique identifier for the device
+        location: Optional location description
+        history: List of readings ordered by date
+        
+    Example:
+        ```python
+        device = Device("12345", "Kitchen")
+        device.add_reading_value(100.5, datetime.now())
+        latest = device.last_reading
+        ```
+    """
 
-    def __init__(self, serial_number: str, device_id: int, name: str):
-        """Initialize a device with a unique identifier, name, and optional location."""
-
+    def __init__(self, serial_number: str, location: str | None = None) -> None:
+        """Initialize a device.
+        
+        Args:
+            serial_number: Unique identifier for the device
+            location: Optional location description
+            
+        Raises:
+            ValueError: If serial_number is empty
+        """
         if not serial_number:
-            raise ValueError("Serial number cannot be empty.")
-        if not device_id:
-            raise ValueError("Device ID cannot be empty.")
-        if not name:
-            raise ValueError("Device name cannot be empty.")
+            raise ValueError("Serial number cannot be empty")
 
         self.serial_number: str = serial_number
-        self.device_id: str = device_id
-        self.name: str = name
+        self.location: str = location or ""
         self.history: list[Reading] = []
 
     def add_reading_value(self, reading_value: float, date: datetime) -> None:
-        """Add reading value to date."""
-
-        r = Reading(date=date, reading=reading_value)
-        self.add_reading(r)
+        """Add a new reading using raw values.
+        
+        This is a convenience method that creates a Reading object
+        and adds it to the device history.
+        
+        Args:
+            reading_value: The meter reading value
+            date: Timestamp of the reading
+            
+        Raises:
+            ValueError: If reading_value is negative
+        """
+        reading = Reading(date=date, reading=reading_value)
+        self.add_reading(reading)
 
     def add_reading(self, reading: Reading) -> None:
-        """Add a new reading with a date."""
-
+        """Add a new reading to the device history.
+        
+        The reading is inserted in chronological order.
+        
+        Args:
+            reading: The Reading object to add
+            
+        Raises:
+            ValueError: If the reading value is negative
+        """
         if reading.reading < 0:
             raise ValueError(f"Reading cannot be negative: {reading}")
 
-        if len(self.history) == 0:
+        if not self.history:
             self.history.append(reading)
         else:
             insort(self.history, reading, key=lambda x: x.date)
+            
         _LOGGER.debug(
-            f"Reading {reading} added for device {self.serial_number} on {reading.date}."
-        )  # noqa: G004
+            "Reading %s added for device %s on %s",
+            reading,
+            self.serial_number,
+            reading.date,
+        )
 
     @property
-    def last_consumption(self) -> Optional[Reading]:
-        """
-        Calculate the consumption between the last two readings.
-        :return: Consumption value or None if not enough data is available.
+    def last_consumption(self) -> Reading | None:
+        """Calculate consumption between the last two readings.
+        
+        Returns:
+            Reading object with consumption value, or None if insufficient data
         """
         if len(self.history) < 2:
-            _LOGGER.warning(
-                f"Not enough data to calculate consumption for device {self.serial_number}."
+            _LOGGER.debug(
+                "Not enough data to calculate consumption for device %s",
+                self.serial_number,
             )
             return None
 
@@ -65,15 +116,19 @@ class Device:
         return Reading(date=last_reading.date, reading=consumption)
 
     @property
-    def last_reading(self) -> Optional[Reading]:
-        """
-        Get the most recent reading.
-        :return: The most recent reading or None if no readings exist.
+    def last_reading(self) -> Reading | None:
+        """Get the most recent reading.
+        
+        Returns:
+            Most recent Reading object, or None if no readings exist
         """
         return self.history[-1] if self.history else None
 
     def __repr__(self) -> str:
+        """Get string representation of the device.
+        
+        Returns:
+            String representation including location and serial number
         """
-        String representation of the device.
-        """
-        return f"<Device {self.device_id}: {self.name} (SN: {self.serial_number})>"
+        location = f" at {self.location}" if self.location else ""
+        return f"<Device{location} (SN: {self.serial_number})>"
