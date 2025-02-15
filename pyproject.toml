@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pycalista-ista"
+version = "0.1.0"
+description = "Python library for the ista calista service"
+authors = [{name = "Juan Herruzo", email = "juan@herruzo.dev"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.12"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "requests>=2.31.0",
+    "xlrd>=2.0.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/herruzo99/pycalista-ista"
+Documentation = "https://github.com/herruzo99/pycalista-ista#readme"
+Repository = "https://github.com/herruzo99/pycalista-ista.git"
+Issues = "https://github.com/herruzo99/pycalista-ista/issues"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q --cov=pycalista_ista"
+testpaths = [
+    "tests",
+]
+
+[tool.coverage.run]
+source = ["pycalista_ista"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "pass",
+    "raise ImportError",
+]
+
+[tool.black]
+line-length = 88
+target-version = ['py312']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
