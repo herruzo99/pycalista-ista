@@ -1,263 +1,340 @@
+"""API client for Ista Calista virtual office.
+
+This module provides a client for interacting with the Ista Calista virtual office web interface.
+It handles authentication, session management, and data retrieval for utility consumption readings.
+
+The client supports:
+- Authentication with username/password
+- Session management with automatic cookie handling
+- Retrieval of historical consumption data
+- Parsing of Excel-format reading data
+- Handling of rate limits and server errors
+"""
+
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 import io
 import logging
+from typing import Final, TypeVar
 from urllib.parse import quote
 
 import requests
 from requests.adapters import HTTPAdapter, Retry
+from requests.exceptions import RequestException
 
+from .const import DATA_URL, LOGIN_URL, USER_AGENT
 from .excel_parser import ExcelParser
+from .exception_classes import LoginError
 
 _LOGGER = logging.getLogger(__name__)
 
+# Type variable for device history dictionaries
+DeviceDict = TypeVar("DeviceDict", bound=dict)
 
-class VirtualApi:  # numpydoc ignore=ES01,EX01,PR01
-    """Attributes
+# Constants
+MAX_RETRIES: Final = 5
+RETRY_BACKOFF: Final = 1
+RETRY_STATUS_CODES: Final = [408, 429, 502, 503, 504]
+MAX_DAYS_PER_REQUEST: Final = 240
+EXCEL_CONTENT_TYPE: Final = "application/vnd.ms-excel;charset=iso-8859-1"
+DATE_FORMAT: Final = "%d/%m/%Y"
 
-    ----------
-    username : str
-        Username for authentication.
-    password : str
-        Password for authentication.
+
+class VirtualApi:
+    """Client for the Ista Calista virtual office API.
+    
+    This class handles all interactions with the Ista Calista web interface,
+    including authentication, session management, and data retrieval.
+    
+    Attributes:
+        username: The username for authentication
+        password: The password for authentication
+        session: The requests Session object for making HTTP requests
+        cookies: Dictionary of session cookies
+    
+    Example:
+        ```python
+        api = VirtualApi("user@example.com", "password")
+        api.login()
+        history = api.get_devices_history(
+            start=date(2024, 1, 1),
+            end=date(2024, 2, 1)
+        )
+        ```
     """
-
-    session: requests.Session
-    cookies: dict[str, any]
-    form_action: str
 
     def __init__(
         self,
         username: str,
         password: str,
-    ) -> None:  # numpydoc ignore=ES01,EX01
-        """Initialize the object with username and password.
-
-        Parameters
-        ----------
-        username : str
-            Username for authentication.
-        password : str
-            Password for authentication.
-        logger : logging.Logger, optional
-            Logger object for logging messages, by default None.
-
+    ) -> None:
+        """Initialize the API client.
+        
+        Args:
+            username: The username for authentication
+            password: The password for authentication
         """
         self.username: str = username
         self.password: str = password
-
-        self.cookies = {}
+        self.cookies: dict[str, str] = {}
+        
+        # Set up session with retry handling
         self.session = requests.Session()
-
         self.session.verify = True
-        retries = Retry(
-            total=5, backoff_factor=1, status_forcelist=[502, 503, 504, 408]
+        retry_strategy = Retry(
+            total=MAX_RETRIES,
+            backoff_factor=RETRY_BACKOFF,
+            status_forcelist=RETRY_STATUS_CODES,
         )
-        self.session.mount("https://", HTTPAdapter(max_retries=retries))
+        self.session.mount("https://", HTTPAdapter(max_retries=retry_strategy))
 
     def _send_request(
-        self, method, url, **kwargs
-    ) -> requests.Response:  # numpydoc ignore=ES01,EX01
-        """Send an HTTP request using the session object.
-
-        Parameters
-        ----------
-        method : str
-            HTTP method for the request (e.g., 'GET', 'POST', 'PUT', 'DELETE').
-        url : str
-            URL to send the request to.
-        **kwargs : dict
-            Additional keyword arguments to pass to `session.request`.
-
-        Returns
-        -------
-        requests.Response
-            Response object returned by the HTTP request.
-
-        Raises
-        ------
-        ValueError
-            If `self.session` is not initialized (i.e., is `None`).
-
+        self,
+        method: str,
+        url: str,
+        **kwargs,
+    ) -> requests.Response:
+        """Send an HTTP request with the session.
+        
+        Args:
+            method: The HTTP method to use
+            url: The URL to send the request to
+            **kwargs: Additional arguments to pass to requests.request()
+            
+        Returns:
+            The response from the server
+            
+        Raises:
+            ValueError: If the session is not initialized
+            RequestException: If the request fails
         """
         if self.session is None:
-            raise ValueError("Session object is not initialized.")
+            raise ValueError("Session object is not initialized")
 
-        response = self.session.request(method, url, **kwargs)
-        _LOGGER.debug(
-            "Performed %s request: %s [%s]:\n%s",
-            method,
-            url,
-            response.status_code,
-            response.text[:100],
-        )
-        response.raise_for_status()
-
-        return response
+        try:
+            response = self.session.request(method, url, **kwargs)
+            _LOGGER.debug(
+                "Performed %s request: %s [%s]:\n%s",
+                method,
+                url,
+                response.status_code,
+                response.text[:100],
+            )
+            response.raise_for_status()
+            return response
+            
+        except RequestException as err:
+            _LOGGER.error("Request failed: %s", err)
+            raise
 
     def relogin(self) -> None:
+        """Clear cookies and perform a fresh login."""
         self.cookies = {}
         self.login()
 
     def login(self) -> None:
-        """Log in to ista Calista."""
-        url = "https://oficina.ista.es/GesCon/GestionOficinaVirtual.do"
-        ua = "Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0"
+        """Authenticate with the Ista Calista virtual office.
+        
+        This method performs the login process and stores the session cookies
+        for subsequent requests.
+        
+        Raises:
+            LoginError: If authentication fails
+            RequestException: If the request fails
+        """
+        if self.cookies:
+            _LOGGER.debug("Using existing cookies")
+            return
 
-        headers = {
-            "User-Agent": ua,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "es-ES,es;q=0.5",
-            "Accept-Encoding": "gzip, deflate, br, zstd",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Origin": "https://oficina.ista.es",
-            "Connection": "keep-alive",
-            "Referer": "https://oficina.ista.es/GesCon/GestionOficinaVirtual.do?metodo=logOutAbonado",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "same-origin",
-            "Sec-Fetch-User": "?1",
-            "Priority": "u=0",
-        }
+        headers = {"User-Agent": USER_AGENT}
         data = {
             "metodo": "loginAbonado",
             "loginName": self.username,
             "password": self.password,
         }
-        if not self.cookies:
-            response = self._send_request("POST", url, headers=headers, data=data)
 
+        try:
+            response = self._send_request("POST", LOGIN_URL, headers=headers, data=data)
+            self._preload_reading_metadata()
+            
+            if response.headers.get("Content-Length") is not None:
+                raise LoginError("Login failed - invalid credentials")
+                
             self.cookies = response.cookies.get_dict()
+            
+        except RequestException as err:
+            raise LoginError(f"Login request failed: {err}") from err
 
-        else:
-            _LOGGER.debug("Cookies already found.")
-
-    def get_devices_history(self, start: date, end: date):
-        current_year__file_buffer = self._get_readings(start, end)
+    def get_devices_history(
+        self,
+        start: date,
+        end: date,
+    ) -> dict:
+        """Get historical consumption data for all devices.
+        
+        Args:
+            start: Start date for the history period
+            end: End date for the history period
+            
+        Returns:
+            Dictionary mapping device serial numbers to device objects with history
+        """
+        current_year_file_buffer = self._get_readings(start, end)
         device_lists = []
-        for current_year, file in current_year__file_buffer:
+        
+        for current_year, file in current_year_file_buffer:
             parser = ExcelParser(file, current_year)
             devices = parser.get_devices_history()
-
             device_lists.append(devices)
 
         return self.merge_device_histories(device_lists)
 
-    def merge_device_histories(self, device_lists: list[dict]) -> dict:
-        """Merges the histories of devices from multiple lists. Each list is a dictionary.
+    def merge_device_histories(self, device_lists: list[DeviceDict]) -> DeviceDict:
+        """Merge device histories from multiple time periods.
         
-        Parameters
-        ----------
-            device_lists (List[dict]):
-                A list of dictionaries containing Device objects.
-
+        This method combines historical readings from different time periods
+        into a single consolidated history for each device.
+        
+        Args:
+            device_lists: List of dictionaries containing device histories
+            
         Returns:
-            dict: A merged dictionary with device serial numbers as keys and
-                Device objects with consolidated histories.
-
+            Dictionary with merged device histories
         """
-        merged_devices = {}
+        merged_devices: DeviceDict = {}
 
         for device_list in device_lists:
             for serial_number, device in device_list.items():
                 if serial_number not in merged_devices:
-                    # If the device is not in merged_devices, add it
                     merged_devices[serial_number] = device
                 else:
-                    # If the device already exists, merge histories
                     existing_device = merged_devices[serial_number]
                     for reading in device.history:
-                        # Add each reading from the current device history to the existing device
                         existing_device.add_reading(reading)
 
         return merged_devices
-
-    def _get_readings_chunk(self, start: datetime, end: datetime, max_days=240):
-        """Helper function that makes the API request for a given date range chunk."""
-        # Check if the date range exceeds the allowed max days
+    
+    def _preload_reading_metadata(self) -> None:
+        """Preload reading metadata required for subsequent requests.
+        
+        The Ista Calista API requires this preliminary request before
+        allowing download of reading data.
+        
+        Raises:
+            RequestException: If the request fails
+        """
+        headers = {"User-Agent": USER_AGENT}
+        params = {"metodo": "preCargaLecturasRadio"}
+        
+        self._send_request(
+            "GET",
+            DATA_URL,
+            headers=headers,
+            cookies=self.cookies,
+            params=params,
+        )
+        
+    def _get_readings_chunk(
+        self,
+        start: datetime,
+        end: datetime,
+        max_days: int = MAX_DAYS_PER_REQUEST,
+    ) -> io.BytesIO:
+        """Get readings for a specific date range chunk.
+        
+        Args:
+            start: Start date for the chunk
+            end: End date for the chunk
+            max_days: Maximum number of days per request
+            
+        Returns:
+            BytesIO object containing the Excel data
+            
+        Raises:
+            ValueError: If the date range exceeds max_days
+            RequestException: If the request fails
+        """
         delta_days = (end - start).days
         if delta_days > max_days:
             raise ValueError(
-                f"Date range exceeds the maximum allowed {max_days} days: {delta_days} days"
+                f"Date range exceeds maximum {max_days} days: {delta_days} days"
             )
 
-        url = "https://oficina.ista.es/GesCon/GestionFincas.do"
-
-        query_params = {
-            "idFinca": "31257",
-            "d-4360165-e": "2",
-            "fechaHastaRadio": quote(end.strftime("%d/%m/%Y")),
-            "validacion": "true",
-            "idAbonado": "",
+        params = {
+            "d-4360165-e": "2",  # 2=xlsx format
+            "fechaHastaRadio": quote(end.strftime(DATE_FORMAT)),
             "metodo": "listadoLecturasRadio",
-            "fechaDesdeRadio": quote(start.strftime("%d/%m/%Y")),
+            "fechaDesdeRadio": quote(start.strftime(DATE_FORMAT)),
             "6578706f7274": "1",
         }
 
-        ua = "Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0"
+        headers = {"User-Agent": USER_AGENT}
 
-        headers = {
-            "User-Agent": ua,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "es-ES,es;q=0.8,en-US;q=0.5,en;q=0.3",
-            "Accept-Encoding": "gzip, deflate, br, zstd",
-            "Connection": "keep-alive",
-            "Referer": "https://oficina.ista.es/GesCon/GestionFincas.do",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "same-origin",
-            "Sec-Fetch-User": "?1",
-            "Priority": "u=0, i",
-        }
+        try:
+            response = self._send_request(
+                "GET",
+                DATA_URL,
+                headers=headers,
+                cookies=self.cookies,
+                params=params,
+            )
 
-        response = self._send_request(
-            "GET", url, headers=headers, cookies=self.cookies, params=query_params
-        )
-        response.raise_for_status()
+            content_type = response.headers.get("Content-Type", "")
+            if EXCEL_CONTENT_TYPE not in content_type:
+                if "text/html" in content_type:
+                    _LOGGER.debug("Session expired, attempting relogin")
+                    self.relogin()
+                    response = self._send_request(
+                        "GET",
+                        DATA_URL,
+                        headers=headers,
+                        cookies=self.cookies,
+                        params=params,
+                    )
+                else:
+                    raise RequestException(f"Unexpected content type: {content_type}")
 
-        content_type = response.headers.get("Content-Type", "")
-        if "application/vnd.ms-excel;charset=iso-8859-1" not in content_type:
-            if "text/html" in content_type:
-                _LOGGER.error("Expired cookies, relogin")
-                self.relogin()  # Renew cookies
-                response = self._send_request(
-                    "GET",
-                    url,
-                    headers=headers,
-                    cookies=self.cookies,
-                    params=query_params,
-                )
-                response.raise_for_status()
-            else:
-                _LOGGER.error(f"Unexpected Error. Content-Type: {content_type}")
-                response.raise_for_status()
-
-        return io.BytesIO(response.content)
+            return io.BytesIO(response.content)
+            
+        except RequestException as err:
+            _LOGGER.error("Failed to get readings chunk: %s", err)
+            raise
 
     def _get_readings(
         self,
         start: datetime = date.today() - timedelta(days=30),
         end: datetime = date.today(),
-        max_days=240,
-    ):
-        """Aggregates readings by calling the helper function in chunks."""
-        all_file_buffers = []  # To store the file buffers from each chunk request
-
-        # Split the date range into chunks of max_days
+        max_days: int = MAX_DAYS_PER_REQUEST,
+    ) -> list[tuple[int, io.BytesIO]]:
+        """Get all readings within a date range, splitting into chunks as needed.
+        
+        Args:
+            start: Start date for readings
+            end: End date for readings
+            max_days: Maximum days per chunk request
+            
+        Returns:
+            List of tuples containing (year, file_buffer) for each chunk
+        """
+        file_buffers = []
         current_start = start
+
         while current_start < end:
-            current_end = min(
-                current_start + timedelta(days=max_days), end
-            )  # Ensure the chunk doesn't exceed the end date
+            current_end = min(current_start + timedelta(days=max_days), end)
+            
+            try:
+                file_buffer = self._get_readings_chunk(current_start, current_end)
+                file_buffers.append((current_end.year, file_buffer))
+            except RequestException as err:
+                _LOGGER.error(
+                    "Failed to get readings for %s to %s: %s",
+                    current_start,
+                    current_end,
+                    err,
+                )
+                raise
 
-            # Get the file buffer for the current chunk
-            file_buffer = self._get_readings_chunk(current_start, current_end)
-            all_file_buffers.append((current_end.year, file_buffer))
-
-            # Move to the next chunk
             current_start = current_end
 
-        return all_file_buffers
+        return file_buffers

@@ -1,0 +1,50 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.12"
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine pytest pytest-cov requests-mock
+        
+    - name: Build package
+      run: python -m build
+      
+    - name: Run tests
+      run: |
+        pip install -e .
+        pytest
+        
+    - name: Publish to Test PyPI
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      run: |
+        twine upload --repository testpypi dist/*
+        
+    - name: Test install from Test PyPI
+      run: |
+        pip uninstall -y pycalista-ista
+        pip install --index-url https://test.pypi.org/simple/ pycalista-ista
+        python -c "import pycalista_ista; print(pycalista_ista.__version__)"
+        
+    - name: Publish to PyPI
+      if: success()
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: |
+        twine upload dist/*

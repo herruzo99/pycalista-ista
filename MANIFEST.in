@@ -1,0 +1,19 @@
+include LICENSE
+include README.md
+include pyproject.toml
+include setup.py
+include MANIFEST.in
+
+recursive-include tests *.py
+recursive-include tests/data *.xls
+
+recursive-exclude * __pycache__
+recursive-exclude * *.py[cod]
+recursive-exclude * *.so
+recursive-exclude * .DS_Store
+recursive-exclude * .env
+recursive-exclude * .venv
+recursive-exclude * venv
+recursive-exclude * env
+recursive-exclude * .coverage
+recursive-exclude * htmlcov
