@@ -110,22 +110,38 @@ pytest tests/test_parser.py
 
 #### GitHub Actions
 
-You can also run tests through GitHub Actions:
+You can run tests through GitHub Actions in two ways:
 
-1. Go to the [Actions tab](https://github.com/herruzo99/pycalista-ista/actions) in the repository
-2. Select the "Test" workflow
-3. Click "Run workflow"
-4. Optional: Enable debug logging for verbose output
-5. Click "Run workflow" to start the tests
+1. **Automatic Runs**:
+   - Tests run automatically on every push to main
+   - Tests run on every pull request
+   - Results appear in the Actions tab
 
-The workflow will:
-- Check code formatting (black, isort)
-- Run all tests with coverage
-- Upload coverage report to Codecov
+2. **Manual Runs**:
+   1. Go to [Actions](https://github.com/herruzo99/pycalista-ista/actions)
+   2. Click on the "Test" workflow in the left sidebar
+   3. Click the "Run workflow" button (blue button, top right)
+   4. Select branch to test (default: main)
+   5. Optionally enable debug logging for verbose output
+   6. Click "Run workflow" green button
+
+The workflow performs:
+- Python 3.12 environment setup
+- Dependency installation
+- Code formatting checks (black, isort)
+- Test execution with coverage
+- Coverage report upload to Codecov
+
+View results:
+- Click on the workflow run in Actions
+- Expand job steps to see details
+- Check Codecov for coverage report
+- Review any test or formatting failures
 
 This is useful for:
-- Verifying the current state of the codebase
-- Testing in a clean environment
+- Verifying changes before PR
+- Testing in clean environment
+- Debugging test issues
 - Generating coverage reports
 
 ## Contributing
