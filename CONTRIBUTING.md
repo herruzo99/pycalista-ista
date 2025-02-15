@@ -26,7 +26,36 @@
 2. Sign in and add your repository
 3. Follow their recommendations to improve score
 
-## Development Workflow
+## Contribution Requirements
+
+### Code Standards
+
+All contributions must follow these standards:
+
+1. Code Style:
+   - Follow [PEP 8](https://peps.python.org/pep-0008/) style guide
+   - Use [Black](https://black.readthedocs.io/) code formatter with default settings
+   - Sort imports using [isort](https://pycqa.github.io/isort/) with Black compatibility
+
+2. Documentation:
+   - All new functions/classes must have docstrings following [Google style](https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings)
+   - Update README.md if adding new features
+   - Include docstring examples for public APIs
+
+3. Testing:
+   - All new code must include tests
+   - Maintain or improve code coverage
+   - Tests must follow [pytest](https://docs.pytest.org/) best practices
+
+4. Type Hints:
+   - Use type hints for all function arguments and return values
+   - Follow [PEP 484](https://peps.python.org/pep-0484/) guidelines
+
+5. Commit Messages:
+   - Follow [Conventional Commits](https://www.conventionalcommits.org/) format
+   - Include issue number if applicable
+
+### Pull Request Process
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
