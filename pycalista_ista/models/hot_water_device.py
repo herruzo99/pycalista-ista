@@ -12,11 +12,11 @@ from .water_device import WaterDevice
 
 class HotWaterDevice(WaterDevice):
     """Class for hot water consumption meters.
-    
+
     This class represents a hot water meter, inheriting core water meter
     functionality from WaterDevice and specializing it for hot water
     consumption tracking.
-    
+
     Example:
         ```python
         meter = HotWaterDevice("12345", "Kitchen Hot Water")
@@ -27,11 +27,11 @@ class HotWaterDevice(WaterDevice):
 
     def __init__(self, serial_number: str, location: str | None = None) -> None:
         """Initialize a hot water meter.
-        
+
         Args:
             serial_number: Unique identifier for the meter
             location: Optional location description
-            
+
         Raises:
             ValueError: If serial_number is empty
         """
@@ -39,7 +39,7 @@ class HotWaterDevice(WaterDevice):
 
     def __repr__(self) -> str:
         """Get string representation of the hot water meter.
-        
+
         Returns:
             String representation including type, location and serial number
         """

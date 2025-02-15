@@ -38,10 +38,10 @@ DEFAULT_HISTORY_DAYS: Final[int] = 30
 
 class PyCalistaIsta:
     """Client for interacting with the Ista Calista API.
-    
+
     This class provides high-level methods for authenticating with
     and retrieving data from the Ista Calista virtual office.
-    
+
     Attributes:
         _email: Email address for authentication
         _password: Password for authentication
@@ -54,17 +54,17 @@ class PyCalistaIsta:
         password: str,
     ) -> None:
         """Initialize the client.
-        
+
         Args:
             email: Email address for authentication
             password: Password for authentication
-            
+
         Raises:
             ValueError: If email or password is empty
         """
         if not email or not password:
             raise ValueError("Email and password are required")
-            
+
         self._email: str = email.strip()
         self._password: str = password
         self._virtual_api = VirtualApi(
@@ -74,7 +74,7 @@ class PyCalistaIsta:
 
     def get_account(self) -> str:
         """Get the account email address.
-        
+
         Returns:
             The authenticated account's email address
         """
@@ -82,7 +82,7 @@ class PyCalistaIsta:
 
     def get_version(self) -> str:
         """Get the client version.
-        
+
         Returns:
             Current version string
         """
@@ -94,24 +94,24 @@ class PyCalistaIsta:
         end: date | None = None,
     ) -> dict[str, Device]:
         """Get historical readings for all devices.
-        
+
         Args:
             start: Start date for history (defaults to DEFAULT_HISTORY_DAYS ago)
             end: End date for history (defaults to today)
-            
+
         Returns:
             Dictionary mapping device serial numbers to Device objects
-            
+
         Raises:
             LoginError: If not authenticated
             ValueError: If start date is after end date
         """
         start = start or date.today() - timedelta(days=DEFAULT_HISTORY_DAYS)
         end = end or date.today()
-        
+
         if start > end:
             raise ValueError("Start date must be before end date")
-            
+
         try:
             return self._virtual_api.get_devices_history(start, end)
         except Exception as err:
@@ -120,10 +120,10 @@ class PyCalistaIsta:
 
     def login(self) -> bool:
         """Authenticate with the Ista Calista API.
-        
+
         Returns:
             True if login successful
-            
+
         Raises:
             LoginError: If authentication fails
         """

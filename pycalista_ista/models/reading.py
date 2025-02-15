@@ -16,15 +16,15 @@ from typing import Any
 @dataclass(frozen=True)
 class Reading:
     """A single meter reading at a specific point in time.
-    
+
     This class represents a meter reading value along with its timestamp.
     It supports comparison operations based on the timestamp and arithmetic
     operations for calculating consumption between readings.
-    
+
     Attributes:
         date: Timestamp of when the reading was taken
         reading: The meter reading value
-        
+
     Example:
         ```python
         reading = Reading(datetime.now(), 100.5)
@@ -38,7 +38,7 @@ class Reading:
 
     def __post_init__(self) -> None:
         """Validate the reading value after initialization.
-        
+
         Raises:
             ValueError: If reading is negative
         """
@@ -47,13 +47,13 @@ class Reading:
 
     def __sub__(self, other: Reading) -> float:
         """Calculate consumption between two readings.
-        
+
         Args:
             other: The previous reading to subtract
-            
+
         Returns:
             The consumption value between the two readings
-            
+
         Raises:
             TypeError: If other is not a Reading instance
         """
@@ -63,13 +63,13 @@ class Reading:
 
     def __lt__(self, other: Reading) -> bool:
         """Compare readings chronologically.
-        
+
         Args:
             other: Another reading to compare with
-            
+
         Returns:
             True if this reading is earlier than other
-            
+
         Raises:
             TypeError: If other is not a Reading instance
         """
@@ -79,7 +79,7 @@ class Reading:
 
     def __str__(self) -> str:
         """Get string representation of the reading.
-        
+
         Returns:
             String with reading value and formatted date
         """

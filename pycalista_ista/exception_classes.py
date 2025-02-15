@@ -15,14 +15,14 @@ from __future__ import annotations
 
 class ServerError(Exception):
     """Base exception for server-related errors.
-    
+
     This exception is raised when there are issues communicating with
     the Ista Calista server or when unexpected server responses are received.
     """
 
     def __init__(self, message: str | None = None) -> None:
         """Initialize the exception.
-        
+
         Args:
             message: Optional error message. If not provided, a default message is used.
         """
@@ -31,7 +31,7 @@ class ServerError(Exception):
 
     def __str__(self) -> str:
         """Return a string representation of the error.
-        
+
         Returns:
             The error message.
         """
@@ -40,14 +40,14 @@ class ServerError(Exception):
 
 class LoginError(ServerError):
     """Exception for authentication failures.
-    
+
     This exception is raised when authentication with the Ista Calista
     server fails, either due to invalid credentials or server issues.
     """
 
     def __init__(self, message: str | None = None) -> None:
         """Initialize the exception.
-        
+
         Args:
             message: Optional error message. If not provided, a default message is used.
         """
@@ -58,14 +58,14 @@ class LoginError(ServerError):
 
 class ParserError(ServerError):
     """Exception for data parsing errors.
-    
+
     This exception is raised when there are issues parsing the data
     received from the Ista Calista server, typically with Excel files.
     """
 
     def __init__(self, message: str | None = None) -> None:
         """Initialize the exception.
-        
+
         Args:
             message: Optional error message. If not provided, a default message is used.
         """

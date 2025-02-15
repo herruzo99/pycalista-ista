@@ -18,6 +18,7 @@ To use this script, run it from the command line:
 
 This will output the version of the `pycalista_ista` package.
 """
+
 import importlib.util
 import sys
 
@@ -40,7 +41,9 @@ def main():
     3.3.2
     0
     """
-    spec = importlib.util.spec_from_file_location("pycalista_ista.__version__", "./src/pycalista_ista/__version.py")
+    spec = importlib.util.spec_from_file_location(
+        "pycalista_ista.__version__", "./src/pycalista_ista/__version.py"
+    )
     version_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(version_module)
     print(version_module.__version__)

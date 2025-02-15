@@ -43,16 +43,16 @@ DATE_FORMAT: Final = "%d/%m/%Y"
 
 class VirtualApi:
     """Client for the Ista Calista virtual office API.
-    
+
     This class handles all interactions with the Ista Calista web interface,
     including authentication, session management, and data retrieval.
-    
+
     Attributes:
         username: The username for authentication
         password: The password for authentication
         session: The requests Session object for making HTTP requests
         cookies: Dictionary of session cookies
-    
+
     Example:
         ```python
         api = VirtualApi("user@example.com", "password")
@@ -70,7 +70,7 @@ class VirtualApi:
         password: str,
     ) -> None:
         """Initialize the API client.
-        
+
         Args:
             username: The username for authentication
             password: The password for authentication
@@ -78,7 +78,7 @@ class VirtualApi:
         self.username: str = username
         self.password: str = password
         self.cookies: dict[str, str] = {}
-        
+
         # Set up session with retry handling
         self.session = requests.Session()
         self.session.verify = True
@@ -96,15 +96,15 @@ class VirtualApi:
         **kwargs,
     ) -> requests.Response:
         """Send an HTTP request with the session.
-        
+
         Args:
             method: The HTTP method to use
             url: The URL to send the request to
             **kwargs: Additional arguments to pass to requests.request()
-            
+
         Returns:
             The response from the server
-            
+
         Raises:
             ValueError: If the session is not initialized
             RequestException: If the request fails
@@ -123,7 +123,7 @@ class VirtualApi:
             )
             response.raise_for_status()
             return response
-            
+
         except RequestException as err:
             _LOGGER.error("Request failed: %s", err)
             raise
@@ -135,10 +135,10 @@ class VirtualApi:
 
     def login(self) -> None:
         """Authenticate with the Ista Calista virtual office.
-        
+
         This method performs the login process and stores the session cookies
         for subsequent requests.
-        
+
         Raises:
             LoginError: If authentication fails
             RequestException: If the request fails
@@ -157,12 +157,12 @@ class VirtualApi:
         try:
             response = self._send_request("POST", LOGIN_URL, headers=headers, data=data)
             self._preload_reading_metadata()
-            
+
             if response.headers.get("Content-Length") is not None:
                 raise LoginError("Login failed - invalid credentials")
-                
+
             self.cookies = response.cookies.get_dict()
-            
+
         except RequestException as err:
             raise LoginError(f"Login request failed: {err}") from err
 
@@ -172,17 +172,17 @@ class VirtualApi:
         end: date,
     ) -> dict:
         """Get historical consumption data for all devices.
-        
+
         Args:
             start: Start date for the history period
             end: End date for the history period
-            
+
         Returns:
             Dictionary mapping device serial numbers to device objects with history
         """
         current_year_file_buffer = self._get_readings(start, end)
         device_lists = []
-        
+
         for current_year, file in current_year_file_buffer:
             parser = ExcelParser(file, current_year)
             devices = parser.get_devices_history()
@@ -192,13 +192,13 @@ class VirtualApi:
 
     def merge_device_histories(self, device_lists: list[DeviceDict]) -> DeviceDict:
         """Merge device histories from multiple time periods.
-        
+
         This method combines historical readings from different time periods
         into a single consolidated history for each device.
-        
+
         Args:
             device_lists: List of dictionaries containing device histories
-            
+
         Returns:
             Dictionary with merged device histories
         """
@@ -214,19 +214,19 @@ class VirtualApi:
                         existing_device.add_reading(reading)
 
         return merged_devices
-    
+
     def _preload_reading_metadata(self) -> None:
         """Preload reading metadata required for subsequent requests.
-        
+
         The Ista Calista API requires this preliminary request before
         allowing download of reading data.
-        
+
         Raises:
             RequestException: If the request fails
         """
         headers = {"User-Agent": USER_AGENT}
         params = {"metodo": "preCargaLecturasRadio"}
-        
+
         self._send_request(
             "GET",
             DATA_URL,
@@ -234,7 +234,7 @@ class VirtualApi:
             cookies=self.cookies,
             params=params,
         )
-        
+
     def _get_readings_chunk(
         self,
         start: datetime,
@@ -242,15 +242,15 @@ class VirtualApi:
         max_days: int = MAX_DAYS_PER_REQUEST,
     ) -> io.BytesIO:
         """Get readings for a specific date range chunk.
-        
+
         Args:
             start: Start date for the chunk
             end: End date for the chunk
             max_days: Maximum number of days per request
-            
+
         Returns:
             BytesIO object containing the Excel data
-            
+
         Raises:
             ValueError: If the date range exceeds max_days
             RequestException: If the request fails
@@ -296,7 +296,7 @@ class VirtualApi:
                     raise RequestException(f"Unexpected content type: {content_type}")
 
             return io.BytesIO(response.content)
-            
+
         except RequestException as err:
             _LOGGER.error("Failed to get readings chunk: %s", err)
             raise
@@ -308,12 +308,12 @@ class VirtualApi:
         max_days: int = MAX_DAYS_PER_REQUEST,
     ) -> list[tuple[int, io.BytesIO]]:
         """Get all readings within a date range, splitting into chunks as needed.
-        
+
         Args:
             start: Start date for readings
             end: End date for readings
             max_days: Maximum days per chunk request
-            
+
         Returns:
             List of tuples containing (year, file_buffer) for each chunk
         """
@@ -322,7 +322,7 @@ class VirtualApi:
 
         while current_start < end:
             current_end = min(current_start + timedelta(days=max_days), end)
-            
+
             try:
                 file_buffer = self._get_readings_chunk(current_start, current_end)
                 file_buffers.append((current_end.year, file_buffer))
