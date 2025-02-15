@@ -12,11 +12,11 @@ from .device import Device
 
 class HeatingDevice(Device):
     """Class for heating consumption meters.
-    
+
     This class represents a heating meter, inheriting core meter
     functionality from Device and specializing it for heating
     consumption tracking.
-    
+
     Example:
         ```python
         meter = HeatingDevice("12345", "Living Room Radiator")
@@ -27,11 +27,11 @@ class HeatingDevice(Device):
 
     def __init__(self, serial_number: str, location: str | None = None) -> None:
         """Initialize a heating meter.
-        
+
         Args:
             serial_number: Unique identifier for the meter
             location: Optional location description
-            
+
         Raises:
             ValueError: If serial_number is empty
         """
@@ -39,7 +39,7 @@ class HeatingDevice(Device):
 
     def __repr__(self) -> str:
         """Get string representation of the heating meter.
-        
+
         Returns:
             String representation including type, location and serial number
         """

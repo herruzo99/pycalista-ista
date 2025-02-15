@@ -37,7 +37,6 @@ __all__ = [
     # Main client
     "PyCalistaIsta",
     "VERSION",
-    
     # Device models
     "Device",
     "WaterDevice",
@@ -45,7 +44,6 @@ __all__ = [
     "ColdWaterDevice",
     "HeatingDevice",
     "Reading",
-    
     # Exceptions
     "LoginError",
     "ParserError",

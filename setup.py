@@ -27,6 +27,6 @@ setup(
     },
     include_package_data=True,  # Include additional files like configuration.yaml, etc.
     package_data={
-        'pycalista_ista': ['*.json'],  # Example if you have data files
+        "pycalista_ista": ["*.json"],  # Example if you have data files
     },
 )

@@ -15,11 +15,12 @@ TEST_EMAIL = "demouser@example.com"
 TEST_WRONG_EMAIL = "wronguser@example.com"
 TEST_PASSWORD = "password"
 
+
 @pytest.fixture
 def excel_file(request):
     path = Path(__file__).parent / request.param
 
-    with open(path, 'rb') as fh:
+    with open(path, "rb") as fh:
         buf = BytesIO(fh.read())
     return buf
 
@@ -34,15 +35,13 @@ def ista_client(request) -> PyCalistaIsta:
     return ista
 
 
-
 @pytest.fixture
 def mock_requests_data(requests_mock: RequestsMock) -> RequestsMock:
     """Mock requests to Login Endpoints."""
     requests_mock.get(
-        DATA_URL + '?metodo=preCargaLecturasRadio',
+        DATA_URL + "?metodo=preCargaLecturasRadio",
         text="""<html lang="es"></html>""",
     )
-
 
     return requests_mock
 
@@ -53,7 +52,6 @@ def mock_wrong_requests_login(requests_mock: RequestsMock) -> RequestsMock:
     requests_mock.post(
         LOGIN_URL,
         text="""<html lang="es"></html>""",
-
     )
 
     return requests_mock
