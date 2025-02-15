@@ -137,6 +137,36 @@ This is useful for:
 5. Push to the branch (`git push origin feature/amazing-feature`)
 6. Open a Pull Request
 
+## Interact with the Project
+
+### Get the Software
+
+1. Install from PyPI:
+```bash
+pip install pycalista-ista
+```
+
+2. Clone the repository:
+```bash
+git clone https://github.com/herruzo99/pycalista-ista.git
+```
+
+### Provide Feedback
+
+We welcome your feedback and bug reports!
+
+1. **Bug Reports**: [Open an issue](https://github.com/herruzo99/pycalista-ista/issues/new?template=bug_report.md) for any problems you encounter
+2. **Feature Requests**: [Submit an enhancement](https://github.com/herruzo99/pycalista-ista/issues/new?template=feature_request.md) for new features
+3. **Questions**: [Start a discussion](https://github.com/herruzo99/pycalista-ista/discussions) for usage questions
+
+### Contribute
+
+We encourage contributions! See our [Contributing Guide](CONTRIBUTING.md) for:
+- Development setup
+- Code standards
+- Testing requirements
+- Pull request process
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
