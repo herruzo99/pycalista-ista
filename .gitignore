@@ -143,8 +143,11 @@ dmypy.json
 
 # Dev tools
 *.lock
-*.toml
 *nl*
 *.pem
 legende.*
 *.asc
+
+# Allow specific files
+!pyproject.toml
+!.github/
