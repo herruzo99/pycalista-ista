@@ -8,8 +8,8 @@ calculations.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import datetime
+from dataclasses import dataclass
 from typing import Any
 
 
