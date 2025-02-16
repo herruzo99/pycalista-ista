@@ -13,9 +13,9 @@ The client supports:
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
 import io
 import logging
+from datetime import date, datetime, timedelta
 from typing import Final, TypeVar
 from urllib.parse import quote
 
@@ -156,11 +156,10 @@ class VirtualApi:
 
         try:
             response = self._send_request("POST", LOGIN_URL, headers=headers, data=data)
-            self._preload_reading_metadata()
 
             if response.headers.get("Content-Length") is not None:
                 raise LoginError("Login failed - invalid credentials")
-
+            self._preload_reading_metadata()
             self.cookies = response.cookies.get_dict()
 
         except RequestException as err:

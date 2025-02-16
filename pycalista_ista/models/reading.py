@@ -9,7 +9,7 @@ calculations.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+import datetime
 from typing import Any
 
 
@@ -37,13 +37,19 @@ class Reading:
     reading: float
 
     def __post_init__(self) -> None:
-        """Validate the reading value after initialization.
+        """Validate the reading value and convert date to UTC.
 
         Raises:
             ValueError: If reading is negative
         """
         if self.reading < 0:
             raise ValueError(f"Reading value cannot be negative: {self.reading}")
+
+        # Convert naive datetime to UTC
+        if self.date.tzinfo is None:
+            object.__setattr__(
+                self, "date", self.date.replace(tzinfo=datetime.timezone.utc)
+            )
 
     def __sub__(self, other: Reading) -> float:
         """Calculate consumption between two readings.
@@ -81,6 +87,22 @@ class Reading:
         """Get string representation of the reading.
 
         Returns:
-            String with reading value and formatted date
+            String with reading value
         """
-        return f"{self.reading:.2f} @ {self.date.isoformat()}"
+        return f"{self.reading}"
+
+    def __eq__(self, other: Any) -> bool:
+        """Compare readings for equality.
+
+        Args:
+            other: Another reading to compare with
+
+        Returns:
+            True if both date and reading value are equal
+        """
+        if not isinstance(other, Reading):
+            return NotImplemented
+        return self.date == other.date and self.reading == other.reading
+
+    def __repr__(self) -> str:
+        return f"<Reading: {self.reading} @ {self.date.isoformat()}>"

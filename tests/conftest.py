@@ -1,15 +1,15 @@
 """Fixtures for Tests."""
 
+import os
 from http import HTTPStatus
 from io import BytesIO
-import os
 from pathlib import Path
 
 import pytest
 from requests_mock.mocker import Mocker as RequestsMock
 
 from pycalista_ista import PyCalistaIsta
-from pycalista_ista.const import LOGIN_URL, DATA_URL
+from pycalista_ista.const import DATA_URL, LOGIN_URL
 
 TEST_EMAIL = "demouser@example.com"
 TEST_WRONG_EMAIL = "wronguser@example.com"
@@ -52,6 +52,7 @@ def mock_wrong_requests_login(requests_mock: RequestsMock) -> RequestsMock:
     requests_mock.post(
         LOGIN_URL,
         text="""<html lang="es"></html>""",
+        headers={"Content-Length": "100"},  # This triggers the login error check
     )
 
     return requests_mock

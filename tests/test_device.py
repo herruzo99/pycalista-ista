@@ -1,6 +1,7 @@
 """Tests for Device models."""
 
-from datetime import datetime
+from datetime import datetime, timezone
+
 import pytest
 
 from pycalista_ista.models.device import Device
@@ -37,7 +38,7 @@ def test_add_reading_value():
 
     assert len(device.history) == 1
     assert device.history[0].reading == 100.5
-    assert device.history[0].date == date
+    assert device.history[0].date == date.replace(tzinfo=timezone.utc)
 
 
 def test_add_reading_negative_value():
@@ -45,7 +46,7 @@ def test_add_reading_negative_value():
     device = Device("12345")
     date = datetime(2025, 1, 1)
 
-    with pytest.raises(ValueError, match="Reading cannot be negative"):
+    with pytest.raises(ValueError, match="Reading value cannot be negative"):
         device.add_reading_value(-1, date)
 
 
@@ -53,9 +54,9 @@ def test_add_reading_chronological_order():
     """Test readings are stored in chronological order."""
     device = Device("12345")
 
-    date1 = datetime(2025, 1, 1)
-    date2 = datetime(2025, 1, 2)
-    date3 = datetime(2025, 1, 3)
+    date1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    date2 = datetime(2025, 1, 2, tzinfo=timezone.utc)
+    date3 = datetime(2025, 1, 3, tzinfo=timezone.utc)
 
     # Add readings in non-chronological order
     device.add_reading_value(100, date2)
@@ -82,13 +83,13 @@ def test_last_consumption_calculation():
     """Test last consumption calculation."""
     device = Device("12345")
 
-    device.add_reading_value(100, datetime(2025, 1, 1))
-    device.add_reading_value(150, datetime(2025, 1, 2))
+    device.add_reading_value(100, datetime(2025, 1, 1, tzinfo=timezone.utc))
+    device.add_reading_value(150, datetime(2025, 1, 2, tzinfo=timezone.utc))
 
     consumption = device.last_consumption
     assert consumption is not None
     assert consumption.reading == 50  # 150 - 100
-    assert consumption.date == datetime(2025, 1, 2)
+    assert consumption.date == datetime(2025, 1, 2, tzinfo=timezone.utc)
 
 
 def test_last_reading():
@@ -97,8 +98,8 @@ def test_last_reading():
 
     assert device.last_reading is None
 
-    date1 = datetime(2025, 1, 1)
-    date2 = datetime(2025, 1, 2)
+    date1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    date2 = datetime(2025, 1, 2, tzinfo=timezone.utc)
 
     device.add_reading_value(100, date1)
     device.add_reading_value(150, date2)

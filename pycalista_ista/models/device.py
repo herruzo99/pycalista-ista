@@ -7,9 +7,9 @@ like storing readings and calculating consumption.
 
 from __future__ import annotations
 
+import logging
 from bisect import insort
 from datetime import datetime
-import logging
 from typing import Final, Optional
 
 from .reading import Reading

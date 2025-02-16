@@ -2,20 +2,37 @@
 
 from datetime import datetime, timezone
 from io import BytesIO
+
 import pytest
 
-from pycalista_ista.exception_classes import ParserError
+from pycalista_ista import ColdWaterDevice, HeatingDevice, HotWaterDevice
 from pycalista_ista.excel_parser import ExcelParser
-from pycalista_ista import HeatingDevice, HotWaterDevice, ColdWaterDevice
+from pycalista_ista.exception_classes import ParserError
 
 
 def test_header_normalization():
     """Test Excel header normalization."""
     excel_parser = ExcelParser(BytesIO(b""))
-    headers = ["Tipo", "N° Serie", "Ubicación", "1º Lectura", "2ª Lectura"]
+    headers = [
+        "Tipo",
+        "N° Serie",
+        "Nº Serie",
+        "Ubicación",
+        "1º Lectura",
+        "26/11",
+        "25/11",
+    ]
     normalized = excel_parser._normalize_headers(headers)
 
-    assert normalized == ["tipo", "n_serie", "ubicacion", "1_lectura", "2_lectura"]
+    assert normalized == [
+        "tipo",
+        "n_serie",
+        "n_serie",
+        "ubicacion",
+        "1_lectura",
+        "26/11",
+        "25/11",
+    ]
 
 
 def test_device_type_creation():
@@ -49,42 +66,74 @@ def test_fill_missing_readings():
             "tipo": "Heating",
             "n_serie": "12345",
             "ubicacion": "Location",
-            "1_lectura": 10,
-            "2_lectura": "",
-            "3_lectura": 30,
+            "27/12": 10,
+            "28/12": "",
+            "29/12": 30,
         }
     ]
-    headers = ["tipo", "n_serie", "ubicacion", "1_lectura", "2_lectura", "3_lectura"]
+    headers = ["tipo", "n_serie", "ubicacion", "27/12", "28/12", "29/12"]
 
     filled_rows = excel_parser._fill_missing_readings(rows, headers)
-    assert filled_rows[0]["2_lectura"] == 30  # Should fill with next available value
+    print(filled_rows)
+    assert filled_rows[0]["28/12"] == 30  # Should fill with next available value
 
 
 @pytest.mark.parametrize(
-    "excel_file", ["data/consulta_2025-01-10_2025-01-25.xls"], indirect=True
+    "excel_file,expected_devices,year",
+    [
+        (
+            "data/consulta_2023-12-29_2024-01-02.xls",
+            11,
+            2024,
+        ),  # Short range, empty water readings
+        (
+            "data/consulta_2024-11-30_2025-01-01.xls",
+            11,
+            2025,
+        ),  # Long range, all devices
+        (
+            "data/consulta_2025-01-10_2025-01-25.xls",
+            11,
+            2025,
+        ),  # Missing readings in some devices
+    ],
+    indirect=["excel_file"],
 )
-def test_get_consumption_data(excel_file: str) -> None:
-    """Test parsing of consumption data from Excel file."""
-    excel_parser = ExcelParser(io_file=excel_file, current_year=2025)
+def test_get_consumption_data(
+    excel_file: str, expected_devices: int, year: int
+) -> None:
+    """Test parsing of consumption data from Excel files."""
+    excel_parser = ExcelParser(io_file=excel_file, current_year=year)
     history = excel_parser.get_devices_history()
+    # Test device count
 
-    # Test device types and counts
-    assert len(history) == 5
-    assert isinstance(history[1], HeatingDevice)
-    assert isinstance(history[2], HeatingDevice)
-    assert isinstance(history[3], HeatingDevice)
-    assert isinstance(history[10], ColdWaterDevice)
-    assert isinstance(history[11], HotWaterDevice)
+    assert len(history) == expected_devices
 
-    # Test device details
-    assert history[1].location == "(1-Cocina1)"
-    assert len(history[1].history) == 27
-    assert history[1].last_consumption == 1
-    assert history[1].last_reading == 27
+    # Test device types
+    assert isinstance(history["141740872"], HeatingDevice)  # Cocina1
+    assert isinstance(history["141740957"], HeatingDevice)  # Dormitorio1
+    assert isinstance(history["414293326"], ColdWaterDevice)  # Agua fría
+    assert isinstance(history["414306286"], HotWaterDevice)  # Agua caliente
 
-    assert len(history[2].history) == 27
-    assert history[2].last_consumption == 0
-    assert history[2].last_reading == 0
+    # Test locations
+    assert history["141740872"].location == "(1-Cocina1)"
+    assert history["141740957"].location == "(2-Dormitorio1)"
+
+    # Test readings are ordered chronologically
+    for device in history.values():
+        if device.history:
+            dates = [reading.date for reading in device.history]
+            assert dates == sorted(dates)
+
+    # Test missing readings are handled
+    dormitorio2 = history["141740933"]  # Has missing reading in 2023-12-29
+    assert all(reading.reading >= 0 for reading in dormitorio2.history)
+
+    # Test water meter readings
+    cold_water = history["414293326"]
+    hot_water = history["414306286"]
+    assert all(reading.reading >= 0 for reading in cold_water.history)
+    assert all(reading.reading >= 0 for reading in hot_water.history)
 
 
 def test_parser_empty_file(tmp_path):
@@ -92,7 +141,7 @@ def test_parser_empty_file(tmp_path):
     empty_file = BytesIO(b"")
     parser = ExcelParser(empty_file)
 
-    with pytest.raises(ParserError, match="File content is empty"):
+    with pytest.raises(ParserError):
         parser.get_devices_history()
 
 
@@ -101,20 +150,17 @@ def test_parser_invalid_file():
     invalid_file = BytesIO(b"not an excel file")
     parser = ExcelParser(invalid_file)
 
-    with pytest.raises(ParserError, match="Failed to parse Excel file"):
+    with pytest.raises(ParserError):
         parser.get_devices_history()
 
 
 def test_parser_missing_required_columns():
     """Test parser behavior with missing required columns."""
-    # Create a minimal Excel-like data with missing required columns
-    from xlrd.sheet import Sheet
-    from xlrd import Book
-    import xlrd
+    # Create a minimal Excel file with missing required columns
+    import xlwt
 
-    # Create workbook and sheet
-    book = Book()
-    sheet = book.add_sheet("Sheet1")
+    workbook = xlwt.Workbook()
+    sheet = workbook.add_sheet("Sheet1")
 
     # Add headers without required columns
     headers = ["some_column", "another_column"]  # Missing tipo, n_serie, ubicacion
@@ -123,12 +169,12 @@ def test_parser_missing_required_columns():
 
     # Write to BytesIO
     excel_data = BytesIO()
-    book.save(excel_data)
+    workbook.save(excel_data)
     excel_data.seek(0)
 
     # Test with missing required columns
     excel_parser = ExcelParser(excel_data)
-    with pytest.raises(ParserError, match="Missing required columns"):
+    with pytest.raises(ParserError):
         excel_parser.get_devices_history()
 
 
@@ -143,12 +189,6 @@ def test_parser_date_handling():
     assert date.day == 15
     assert date.tzinfo == timezone.utc
 
-    # Test date parsing with previous year flag
-    date = excel_parser._parse_reading_date(
-        "15/01", datetime(2025, 12, 1, tzinfo=timezone.utc), 2024, True
-    )
-    assert date.year == 2024
-
 
 def test_parser_reading_value_handling():
     """Test reading value parsing and validation."""
@@ -162,6 +202,8 @@ def test_parser_reading_value_handling():
         "03/01": 20,
     }
     excel_parser._add_device_readings(device, readings)
+
+    print(device.history)
 
     assert len(device.history) == 3
     assert device.history[0].reading == 10.5

@@ -1,6 +1,7 @@
 """Tests for Reading model."""
 
 from datetime import datetime, timezone
+
 import pytest
 
 from pycalista_ista.models.reading import Reading
@@ -17,11 +18,11 @@ def test_reading_initialization():
 
 def test_reading_initialization_no_timezone():
     """Test reading initialization with naive datetime."""
-    date = datetime(2025, 1, 1)
-    reading = Reading(date=date, reading=100.5)
+    naive_date = datetime(2025, 1, 1)
+    reading = Reading(date=naive_date, reading=100.5)
 
     assert reading.date.tzinfo == timezone.utc
-    assert reading.date == datetime(2025, 1, 1, tzinfo=timezone.utc)
+    assert reading.date == naive_date.replace(tzinfo=timezone.utc)
 
 
 def test_reading_comparison():
@@ -35,15 +36,13 @@ def test_reading_comparison():
 
     # Test equality
     assert reading1 == Reading(date=date1, reading=100)
+    assert reading1 != reading3  # Different readings should not be equal
 
     # Test less than (based on date)
     assert reading1 < reading2
 
     # Test greater than (based on date)
     assert reading2 > reading1
-
-    # Test same date different values
-    assert reading1 == reading3  # Equality only checks date
 
 
 def test_reading_subtraction():
@@ -69,4 +68,4 @@ def test_reading_string_representation():
     reading = Reading(date=date, reading=100.5)
 
     assert str(reading) == "100.5"
-    assert repr(reading) == f"<Reading: 100.5 @ {date}>"
+    assert repr(reading) == f"<Reading: 100.5 @ {date.isoformat()}>"
