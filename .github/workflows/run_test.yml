@@ -42,9 +42,9 @@ jobs:
     - name: Run tests
       run: |
         if [ "${{ github.event.inputs.debug_enabled }}" = "true" ]; then
-          pytest -v --cov
+          pytest -v --cov-branch --cov-report=xml
         else
-          pytest --cov
+          pytest --cov-branch --cov-report=xml
         fi
         
     - name: Upload coverage to Codecov
