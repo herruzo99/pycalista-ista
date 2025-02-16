@@ -1,0 +1,2 @@
+[homeassistant.integration]
+pycalista-ista = pycalista_ista
