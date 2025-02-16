@@ -183,7 +183,7 @@ def test_parser_date_handling():
     excel_parser = ExcelParser(BytesIO(b""), current_year=2025)
 
     # Test date parsing with current year
-    date = excel_parser._parse_reading_date("15/01", None, 2024, False)
+    date = excel_parser._parse_reading_date("15/01/2025")
     assert date.year == 2025
     assert date.month == 1
     assert date.day == 15
@@ -197,9 +197,9 @@ def test_parser_reading_value_handling():
 
     # Test valid readings
     readings = {
-        "01/01": "10,5",
-        "02/01": "15.7",
-        "03/01": 20,
+        "03/01/2025": 20,
+        "02/01/2025": "15.7",
+        "01/01/2025": "10,5",
     }
     excel_parser._add_device_readings(device, readings)
 
