@@ -8,12 +8,12 @@ Example:
     ```python
     client = PyCalistaIsta("user@example.com", "password")
     client.login()
-    
+
     # Get device readings for the last 30 days
     devices = client.get_devices_history(
         start=date.today() - timedelta(days=30)
     )
-    
+
     for device in devices.values():
         print(f"{device}: {device.last_reading}")
     ```

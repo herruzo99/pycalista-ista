@@ -7,7 +7,7 @@ data from various types of meters.
 Example:
     ```python
     from pycalista_ista import PyCalistaIsta
-    
+
     client = PyCalistaIsta("user@example.com", "password")
     client.login()
     devices = client.get_devices()
@@ -20,8 +20,14 @@ from typing import Final
 
 from .__version import __version__
 from .exception_classes import LoginError, ParserError, ServerError
-from .models import (ColdWaterDevice, Device, HeatingDevice, HotWaterDevice,
-                     Reading, WaterDevice)
+from .models import (
+    ColdWaterDevice,
+    Device,
+    HeatingDevice,
+    HotWaterDevice,
+    Reading,
+    WaterDevice,
+)
 from .pycalista_ista import PyCalistaIsta
 
 # Version information

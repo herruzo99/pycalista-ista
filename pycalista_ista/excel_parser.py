@@ -90,7 +90,7 @@ class ExcelParser:
 
             # Normalize headers
             df.columns = self._normalize_headers(df.columns.tolist())
-            
+
             df.columns = self._add_year_to_dates(df.columns.tolist())
 
             # Convert to list of dicts
@@ -109,21 +109,21 @@ class ExcelParser:
         Returns:
             List of all header with the correct year.
         """
-        current_year=self.current_year
+        current_year = self.current_year
         last_date = None
         new_headers = []
         for header in raw_headers:
             if header in METADATA_COLUMNS:
                 new_headers.append(header)
             else:
-                current_date = datetime.strptime(f"{header}/2024",DATE_FORMAT)
+                current_date = datetime.strptime(f"{header}/2024", DATE_FORMAT)
                 if last_date is not None and last_date.month < current_date.month:
-                    current_year-=1
+                    current_year -= 1
                 last_date = current_date
                 new_headers.append(f"{header}/{current_year}")
-        
+
         return new_headers
-        
+
     def _normalize_headers(self, raw_headers: list[str]) -> list[str]:
         """Normalize Excel column headers.
 
@@ -289,10 +289,7 @@ class ExcelParser:
                     err,
                 )
 
-    def _parse_reading_date(
-        self,
-        date_str: str
-    ) -> datetime:
+    def _parse_reading_date(self, date_str: str) -> datetime:
         """Parse a reading date string.
 
         Args:
