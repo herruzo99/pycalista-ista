@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pycalista-ista"
-version = "0.1.1"
+version = "0.1.2"
 description = "Python library for the ista calista service"
 authors = [{name = "Juan Herruzo", email = "juan@herruzo.dev"}]
 license = {text = "MIT"}
@@ -42,6 +42,13 @@ Homepage = "https://github.com/herruzo99/pycalista-ista"
 Documentation = "https://github.com/herruzo99/pycalista-ista#readme"
 Repository = "https://github.com/herruzo99/pycalista-ista.git"
 Issues = "https://github.com/herruzo99/pycalista-ista/issues"
+
+[tool.setuptools]
+packages = ["pycalista_ista", "pycalista_ista.models"]
+package-dir = {"" = "."}
+
+[tool.setuptools.dynamic]
+entry-points = {file = ["entry_points.txt"]}
 
 [tool.pytest.ini_options]
 minversion = "6.0"
