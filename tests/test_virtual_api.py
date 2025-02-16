@@ -1,10 +1,10 @@
 """Tests for VirtualApi and login functionality."""
 
+import re
 from datetime import date, datetime, timedelta
 from http import HTTPStatus
 from io import BytesIO
 from unittest.mock import Mock, patch
-import re
 
 import pytest
 import xlwt
@@ -86,17 +86,23 @@ def test_get_readings_chunk(requests_mock):
     # Create a minimal Excel file
     workbook = xlwt.Workbook()
     sheet = workbook.add_sheet("Sheet1")
-    
+
     # Add headers
     headers = ["Tipo", "N° Serie", "Ubicación", "01/01", "02/01"]
     for col, header in enumerate(headers):
         sheet.write(0, col, header)
-    
+
     # Add a row
-    row_data = ["Radio Distribuidor de Costes de Calefacción", "12345", "Kitchen", 100, 150]
+    row_data = [
+        "Radio Distribuidor de Costes de Calefacción",
+        "12345",
+        "Kitchen",
+        100,
+        150,
+    ]
     for col, value in enumerate(row_data):
         sheet.write(1, col, value)
-    
+
     # Write to BytesIO
     excel_content = BytesIO()
     workbook.save(excel_content)
@@ -119,7 +125,6 @@ def test_get_readings_chunk_session_expired(requests_mock):
     api = VirtualApi("test@example.com", "password")
     api.cookies = {"FGTServer": "expired_cookie"}
 
-
     requests_mock.post(
         "https://oficina.ista.es/GesCon/GestionOficinaVirtual.do",
         cookies={"FGTServer": "new_cookie"},
@@ -133,35 +138,41 @@ def test_get_readings_chunk_session_expired(requests_mock):
     # Create Excel file for session expired test
     workbook = xlwt.Workbook()
     sheet = workbook.add_sheet("Sheet1")
-    
+
     # Add headers
     headers = ["Tipo", "N° Serie", "Ubicación", "01/01", "02/01"]
     for col, header in enumerate(headers):
         sheet.write(0, col, header)
-    
+
     # Add a row
-    row_data = ["Radio Distribuidor de Costes de Calefacción", "12345", "Kitchen", 100, 150]
+    row_data = [
+        "Radio Distribuidor de Costes de Calefacción",
+        "12345",
+        "Kitchen",
+        100,
+        150,
+    ]
     for col, value in enumerate(row_data):
         sheet.write(1, col, value)
-    
+
     # Write to BytesIO
     excel_content = BytesIO()
     workbook.save(excel_content)
     excel_content.seek(0)
-    
-    matcher = re.compile('https://oficina\.ista\.es/GesCon/GestionFincas\.do.*')
+
+    matcher = re.compile(r"https://oficina\.ista\.es/GesCon/GestionFincas\.do.*")
     requests_mock.get(
         matcher,
         text="<html>Session expired</html>",
         headers={"Content-Type": "text/html"},
-        request_headers={'Cookie': 'FGTServer=expired_cookie'}
+        request_headers={"Cookie": "FGTServer=expired_cookie"},
     )
 
     requests_mock.get(
         matcher,
         content=excel_content.getvalue(),
         headers={"Content-Type": "application/vnd.ms-excel;charset=iso-8859-1"},
-        request_headers={'Cookie': 'FGTServer=new_cookie'}
+        request_headers={"Cookie": "FGTServer=new_cookie"},
     )
 
     start = datetime(2025, 1, 1)
@@ -199,22 +210,28 @@ def test_get_devices_history(requests_mock):
     # Create Excel file for device history test
     workbook = xlwt.Workbook()
     sheet = workbook.add_sheet("Sheet1")
-    
+
     # Add headers
     headers = ["Tipo", "N° Serie", "Ubicación", "01/01", "02/01"]
     for col, header in enumerate(headers):
         sheet.write(0, col, header)
-    
+
     # Add a row
-    row_data = ["Radio Distribuidor de Costes de Calefacción", "12345", "Kitchen", 100, 150]
+    row_data = [
+        "Radio Distribuidor de Costes de Calefacción",
+        "12345",
+        "Kitchen",
+        100,
+        150,
+    ]
     for col, value in enumerate(row_data):
         sheet.write(1, col, value)
-    
+
     # Write to BytesIO
     excel_content = BytesIO()
     workbook.save(excel_content)
     excel_content.seek(0)
-    
+
     requests_mock.get(
         "https://oficina.ista.es/GesCon/GestionFincas.do",
         content=excel_content.getvalue(),

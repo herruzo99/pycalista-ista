@@ -108,7 +108,13 @@ class ExcelParser:
             List of normalized header strings
         """
         return [
-            unidecode(header.strip().lower().replace("°", "").replace("º", "").replace(" ", "_"))
+            unidecode(
+                header.strip()
+                .lower()
+                .replace("°", "")
+                .replace("º", "")
+                .replace(" ", "_")
+            )
             for header in raw_headers
         ]
 
@@ -134,7 +140,9 @@ class ExcelParser:
             for column in reversed(headers):
                 reading_value = row_dict.get(column)
 
-                if (pd.isnull(reading_value) or reading_value == '') and previous_reading_value is not None:
+                if (
+                    pd.isnull(reading_value) or reading_value == ""
+                ) and previous_reading_value is not None:
                     row_dict[column] = (
                         previous_reading_value if column not in METADATA_COLUMNS else ""
                     )
