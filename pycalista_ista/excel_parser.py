@@ -90,6 +90,8 @@ class ExcelParser:
 
             # Normalize headers
             df.columns = self._normalize_headers(df.columns.tolist())
+            
+            df.columns = self._add_year_to_dates(df.columns.tolist())
 
             # Convert to list of dicts
             rows = df.to_dict("records")
@@ -98,6 +100,30 @@ class ExcelParser:
         except Exception as err:
             raise ParserError(f"Failed to process Excel file: {err}") from err
 
+    def _add_year_to_dates(self, raw_headers: list[str]) -> list[str]:
+        """Add year to Excel column headers.
+
+        Args:
+            raw_headers: Raw header strings from Excel
+
+        Returns:
+            List of all header with the correct year.
+        """
+        current_year=self.current_year
+        last_date = None
+        new_headers = []
+        for header in raw_headers:
+            if header in METADATA_COLUMNS:
+                new_headers.append(header)
+            else:
+                current_date = datetime.strptime(f"{header}/2024",DATE_FORMAT)
+                if last_date is not None and last_date.month < current_date.month:
+                    current_year-=1
+                last_date = current_date
+                new_headers.append(f"{header}/{current_year}")
+        
+        return new_headers
+        
     def _normalize_headers(self, raw_headers: list[str]) -> list[str]:
         """Normalize Excel column headers.
 
@@ -164,7 +190,6 @@ class ExcelParser:
         """
         try:
             sensors = self._get_rows_as_dict()
-            print(sensors)
 
             devices: DeviceDict = {}
 
@@ -236,29 +261,12 @@ class ExcelParser:
             device: Device to add readings to
             readings: Dictionary of date strings to reading values
         """
-        last_processed_date = None
-        previous_year = self.current_year - 1
-        in_previous_year = False
 
         for date_str, reading in readings.items():
             try:
                 reading_date = self._parse_reading_date(
                     date_str,
-                    last_processed_date,
-                    previous_year,
-                    in_previous_year,
                 )
-
-                if reading_date.month > (
-                    last_processed_date.month if last_processed_date else 0
-                ):
-                    in_previous_year = True
-
-                if in_previous_year:
-                    reading_date.replace(year=previous_year)
-
-                last_processed_date = reading_date
-
                 if pd.isna(reading):
                     reading_value = 0.0
                 else:
@@ -283,10 +291,7 @@ class ExcelParser:
 
     def _parse_reading_date(
         self,
-        date_str: str,
-        last_processed_date: datetime | None,
-        previous_year: int,
-        in_previous_year: bool,
+        date_str: str
     ) -> datetime:
         """Parse a reading date string.
 
@@ -303,7 +308,7 @@ class ExcelParser:
             ValueError: If date parsing fails
         """
         parsed_date = datetime.strptime(
-            f"{date_str}/{self.current_year}",
+            f"{date_str}",
             DATE_FORMAT,
         ).replace(tzinfo=timezone.utc)
 

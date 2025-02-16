@@ -209,3 +209,30 @@ def test_parser_reading_value_handling():
     assert device.history[0].reading == 10.5
     assert device.history[1].reading == 15.7
     assert device.history[2].reading == 20.0
+
+
+def test_add_year_to_dates():
+    """Test year addition to date headers."""
+    excel_parser = ExcelParser(BytesIO(b""), current_year=2024)
+    
+    # Test headers with metadata and dates in decreasing order
+    headers = [
+        "tipo",
+        "n_serie", 
+        "ubicacion",
+        "15/01",   # Should be 2024
+        "01/01",   # Should be 2024
+        "15/12"    # Should be 2023 since it's a lower month after higher months
+    ]
+    
+    processed_headers = excel_parser._add_year_to_dates(headers)
+    
+    # Verify metadata columns remain unchanged
+    assert processed_headers[0] == "tipo"
+    assert processed_headers[1] == "n_serie"
+    assert processed_headers[2] == "ubicacion"
+    
+    # Verify date headers get correct years
+    assert processed_headers[3] == "15/01/2024"
+    assert processed_headers[4] == "01/01/2024"
+    assert processed_headers[5] == "15/12/2023"  # Previous year due to month decrease
