@@ -1,21 +1,20 @@
 """Tests for VirtualApi and login functionality."""
 
-from datetime import datetime, date, timedelta
+from datetime import date, datetime, timedelta
 from http import HTTPStatus
 from io import BytesIO
-import pytest
 from unittest.mock import Mock, patch
+import re
 
+import pytest
+import xlwt
 from requests.exceptions import RequestException
 
-from pycalista_ista.virtual_api import VirtualApi
+from pycalista_ista import ParserError, PyCalistaIsta, ServerError
 from pycalista_ista.exception_classes import LoginError
 from pycalista_ista.models.heating_device import HeatingDevice
-from pycalista_ista import ParserError, PyCalistaIsta, ServerError
+from pycalista_ista.virtual_api import VirtualApi
 from tests.conftest import TEST_EMAIL
-
-
-# VirtualApi Tests
 
 
 def test_virtual_api_initialization():
@@ -31,16 +30,14 @@ def test_login_success(requests_mock):
     """Test successful login."""
     api = VirtualApi("test@example.com", "password")
 
-    # Mock successful login response
     requests_mock.post(
-        "https://www.ista.es/IstaWebApp/loginAbonado.do",
-        headers={"Content-Length": None},
+        "https://oficina.ista.es/GesCon/GestionOficinaVirtual.do",
         cookies={"FGTServer": "testFGTServer"},
     )
 
-    # Mock preload request
     requests_mock.get(
-        "https://www.ista.es/IstaWebApp/listadoLecturasRadio.do", text="success"
+        "https://oficina.ista.es/GesCon/GestionFincas.do?metodo=preCargaLecturasRadio",
+        text="success",
     )
 
     api.login()
@@ -52,9 +49,8 @@ def test_login_failure(requests_mock):
     """Test login failure."""
     api = VirtualApi("test@example.com", "wrong_password")
 
-    # Mock failed login response
     requests_mock.post(
-        "https://www.ista.es/IstaWebApp/loginAbonado.do",
+        "https://oficina.ista.es/GesCon/GestionOficinaVirtual.do",
         headers={"Content-Length": "100"},
         text="Login failed",
     )
@@ -68,16 +64,14 @@ def test_relogin(requests_mock):
     api = VirtualApi("test@example.com", "password")
     api.cookies = {"FGTServer": "old_cookie"}
 
-    # Mock successful login response
     requests_mock.post(
-        "https://www.ista.es/IstaWebApp/loginAbonado.do",
-        headers={"Content-Length": None},
+        "https://oficina.ista.es/GesCon/GestionOficinaVirtual.do",
         cookies={"FGTServer": "new_cookie"},
     )
 
-    # Mock preload request
     requests_mock.get(
-        "https://www.ista.es/IstaWebApp/listadoLecturasRadio.do", text="success"
+        "https://oficina.ista.es/GesCon/GestionFincas.do?metodo=preCargaLecturasRadio",
+        text="success",
     )
 
     api.relogin()
@@ -89,11 +83,27 @@ def test_get_readings_chunk(requests_mock):
     api = VirtualApi("test@example.com", "password")
     api.cookies = {"FGTServer": "test_cookie"}
 
-    # Mock Excel response
-    excel_content = b"test excel content"
+    # Create a minimal Excel file
+    workbook = xlwt.Workbook()
+    sheet = workbook.add_sheet("Sheet1")
+    
+    # Add headers
+    headers = ["Tipo", "N° Serie", "Ubicación", "01/01", "02/01"]
+    for col, header in enumerate(headers):
+        sheet.write(0, col, header)
+    
+    # Add a row
+    row_data = ["Radio Distribuidor de Costes de Calefacción", "12345", "Kitchen", 100, 150]
+    for col, value in enumerate(row_data):
+        sheet.write(1, col, value)
+    
+    # Write to BytesIO
+    excel_content = BytesIO()
+    workbook.save(excel_content)
+    excel_content.seek(0)
     requests_mock.get(
-        "https://www.ista.es/IstaWebApp/listadoLecturasRadio.do",
-        content=excel_content,
+        "https://oficina.ista.es/GesCon/GestionFincas.do",
+        content=excel_content.getvalue(),
         headers={"Content-Type": "application/vnd.ms-excel;charset=iso-8859-1"},
     )
 
@@ -101,7 +111,7 @@ def test_get_readings_chunk(requests_mock):
     end = datetime(2025, 1, 30)
 
     result = api._get_readings_chunk(start, end)
-    assert result.read() == excel_content
+    assert result.read() == excel_content.read()
 
 
 def test_get_readings_chunk_session_expired(requests_mock):
@@ -109,38 +119,56 @@ def test_get_readings_chunk_session_expired(requests_mock):
     api = VirtualApi("test@example.com", "password")
     api.cookies = {"FGTServer": "expired_cookie"}
 
-    # Mock HTML response (session expired)
-    requests_mock.get(
-        "https://www.ista.es/IstaWebApp/listadoLecturasRadio.do",
-        text="<html>Session expired</html>",
-        headers={"Content-Type": "text/html"},
-    )
 
-    # Mock relogin
     requests_mock.post(
-        "https://www.ista.es/IstaWebApp/loginAbonado.do",
-        headers={"Content-Length": None},
+        "https://oficina.ista.es/GesCon/GestionOficinaVirtual.do",
         cookies={"FGTServer": "new_cookie"},
     )
 
-    # Mock preload request
     requests_mock.get(
-        "https://www.ista.es/IstaWebApp/listadoLecturasRadio.do", text="success"
+        "https://oficina.ista.es/GesCon/GestionFincas.do?metodo=preCargaLecturasRadio",
+        text="success",
     )
 
-    # Mock successful Excel response after relogin
-    excel_content = b"test excel content"
+    # Create Excel file for session expired test
+    workbook = xlwt.Workbook()
+    sheet = workbook.add_sheet("Sheet1")
+    
+    # Add headers
+    headers = ["Tipo", "N° Serie", "Ubicación", "01/01", "02/01"]
+    for col, header in enumerate(headers):
+        sheet.write(0, col, header)
+    
+    # Add a row
+    row_data = ["Radio Distribuidor de Costes de Calefacción", "12345", "Kitchen", 100, 150]
+    for col, value in enumerate(row_data):
+        sheet.write(1, col, value)
+    
+    # Write to BytesIO
+    excel_content = BytesIO()
+    workbook.save(excel_content)
+    excel_content.seek(0)
+    
+    matcher = re.compile('https://oficina\.ista\.es/GesCon/GestionFincas\.do.*')
     requests_mock.get(
-        "https://www.ista.es/IstaWebApp/listadoLecturasRadio.do",
-        content=excel_content,
+        matcher,
+        text="<html>Session expired</html>",
+        headers={"Content-Type": "text/html"},
+        request_headers={'Cookie': 'FGTServer=expired_cookie'}
+    )
+
+    requests_mock.get(
+        matcher,
+        content=excel_content.getvalue(),
         headers={"Content-Type": "application/vnd.ms-excel;charset=iso-8859-1"},
+        request_headers={'Cookie': 'FGTServer=new_cookie'}
     )
 
     start = datetime(2025, 1, 1)
     end = datetime(2025, 1, 30)
 
     result = api._get_readings_chunk(start, end)
-    assert result.read() == excel_content
+    assert result.read() == excel_content.getvalue()
     assert api.cookies["FGTServer"] == "new_cookie"
 
 
@@ -148,7 +176,6 @@ def test_merge_device_histories():
     """Test merging device histories from multiple periods."""
     api = VirtualApi("test@example.com", "password")
 
-    # Create test devices with different readings
     device1 = HeatingDevice("12345", "Kitchen")
     device1.add_reading_value(100, datetime(2025, 1, 1))
 
@@ -169,11 +196,28 @@ def test_get_devices_history(requests_mock):
     api = VirtualApi("test@example.com", "password")
     api.cookies = {"FGTServer": "test_cookie"}
 
-    # Mock Excel response
-    excel_content = b"test excel content"
+    # Create Excel file for device history test
+    workbook = xlwt.Workbook()
+    sheet = workbook.add_sheet("Sheet1")
+    
+    # Add headers
+    headers = ["Tipo", "N° Serie", "Ubicación", "01/01", "02/01"]
+    for col, header in enumerate(headers):
+        sheet.write(0, col, header)
+    
+    # Add a row
+    row_data = ["Radio Distribuidor de Costes de Calefacción", "12345", "Kitchen", 100, 150]
+    for col, value in enumerate(row_data):
+        sheet.write(1, col, value)
+    
+    # Write to BytesIO
+    excel_content = BytesIO()
+    workbook.save(excel_content)
+    excel_content.seek(0)
+    
     requests_mock.get(
-        "https://www.ista.es/IstaWebApp/listadoLecturasRadio.do",
-        content=excel_content,
+        "https://oficina.ista.es/GesCon/GestionFincas.do",
+        content=excel_content.getvalue(),
         headers={"Content-Type": "application/vnd.ms-excel;charset=iso-8859-1"},
     )
 
@@ -187,9 +231,6 @@ def test_get_devices_history(requests_mock):
         history = api.get_devices_history(start, end)
         assert len(history) == 1
         assert "12345" in history
-
-
-# PyCalistaIsta Integration Tests
 
 
 @pytest.mark.parametrize("ista_client", [TEST_EMAIL], indirect=True)

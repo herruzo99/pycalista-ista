@@ -1,6 +1,7 @@
 """Tests for HeatingDevice model."""
 
-from datetime import datetime
+from datetime import datetime, timezone
+
 import pytest
 
 from pycalista_ista.models.heating_device import HeatingDevice
@@ -32,7 +33,7 @@ def test_heating_device_initialization_empty_serial():
 def test_heating_device_inheritance():
     """Test that heating device inherits Device functionality."""
     device = HeatingDevice("12345", "Living Room")
-    date = datetime(2025, 1, 1)
+    date = datetime(2025, 1, 1, tzinfo=timezone.utc)
 
     # Test inherited add_reading_value
     device.add_reading_value(100.5, date)

@@ -1,6 +1,7 @@
 """Tests for WaterDevice model."""
 
-from datetime import datetime
+from datetime import datetime, timezone
+
 import pytest
 
 from pycalista_ista.models.water_device import WaterDevice
@@ -32,7 +33,7 @@ def test_water_device_initialization_empty_serial():
 def test_water_device_inheritance():
     """Test that water device inherits Device functionality."""
     device = WaterDevice("12345", "Kitchen Sink")
-    date = datetime(2025, 1, 1)
+    date = datetime(2025, 1, 1, tzinfo=timezone.utc)
 
     # Test inherited add_reading_value
     device.add_reading_value(100.5, date)

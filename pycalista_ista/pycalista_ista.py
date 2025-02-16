@@ -21,8 +21,8 @@ Example:
 
 from __future__ import annotations
 
-from datetime import date, timedelta
 import logging
+from datetime import date, timedelta
 from typing import Final
 
 from .__version import __version__

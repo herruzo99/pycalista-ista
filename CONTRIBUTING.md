@@ -62,19 +62,35 @@ All contributions must follow these standards:
 3. Install development dependencies:
    ```bash
    pip install -e ".[dev]"
-   pip install pytest pytest-cov requests-mock black isort
    ```
-4. Make your changes
-5. Run tests and formatting:
+
+4. Set up pre-commit hooks:
    ```bash
-   # Format code
-   black .
-   isort .
-   
-   # Run tests
+   # Install pre-commit
+   pre-commit install
+
+   # The hooks will now run automatically on each commit
+   # They will format your code with black and isort
+   ```
+
+   You can also run the formatters manually:
+   ```bash
+   # Run on all files
+   pre-commit run --all-files
+
+   # Run on specific files
+   pre-commit run --files path/to/file.py
+   ```
+
+5. Make your changes and run tests:
+   ```bash
    pytest --cov
    ```
-6. Commit your changes (`git commit -m 'Add amazing feature'`)
+
+6. Commit your changes:
+   - The pre-commit hooks will run automatically
+   - If any files are reformatted, stage them and commit again
+
 7. Push to the branch (`git push origin feature/amazing-feature`)
 8. Open a Pull Request
 

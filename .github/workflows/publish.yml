@@ -5,7 +5,7 @@ on:
     types: [created]
 
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -18,33 +18,67 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install build twine pytest pytest-cov requests-mock
+        pip install .[dev]
+        
+    - name: Run tests
+      run: pytest
+        
+  deploy-test:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/pycalista-ista
+    permissions:
+      id-token: write
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.12"
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build
         
     - name: Build package
       run: python -m build
       
-    - name: Run tests
-      run: |
-        pip install -e .
-        pytest
+    - name: Publish to TestPyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        repository-url: https://test.pypi.org/legacy/
         
-    - name: Publish to Test PyPI
-      env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
+    - name: Test install from TestPyPI
       run: |
-        twine upload --repository testpypi dist/*
-        
-    - name: Test install from Test PyPI
-      run: |
-        pip uninstall -y pycalista-ista
         pip install --index-url https://test.pypi.org/simple/ pycalista-ista
-        python -c "import pycalista_ista; print(pycalista_ista.__version__)"
         
-    - name: Publish to PyPI
-      if: success()
-      env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+  deploy-prod:
+    needs: deploy-test
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pycalista-ista
+    permissions:
+      id-token: write
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.12"
+        
+    - name: Install dependencies
       run: |
-        twine upload dist/*
+        python -m pip install --upgrade pip
+        pip install build
+        
+    - name: Build package
+      run: python -m build
+      
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1

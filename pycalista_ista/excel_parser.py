@@ -7,12 +7,13 @@ and their historical readings, including data normalization and validation.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import logging
-from typing import Any, Final, IO, TypeVar
+from datetime import datetime, timezone
+from io import BytesIO
+from typing import IO, Any, Final, TypeVar
 
-import xlrd
-from xlrd.sheet import Sheet
+import pandas as pd
+from unidecode import unidecode
 
 from .exception_classes import ParserError
 from .models.cold_water_device import ColdWaterDevice
@@ -72,39 +73,30 @@ class ExcelParser:
         Raises:
             ParserError: If file is empty or parsing fails
         """
+        # Try different Excel engines
+        self.io_file.seek(0)
+        content = self.io_file.read()
+        _LOGGER.debug("File size: %d bytes", len(content))
+
         try:
-            file_data = self.io_file.read()
-            if not file_data:
+            _LOGGER.debug("Trying to read Excel")
+            # Create new BytesIO for each attempt
+            file_copy = BytesIO(content)
+            df = pd.read_excel(file_copy)
+            if not df.empty:
+                _LOGGER.debug("Successfully read Excel")
+            if df.empty:
                 raise ParserError("File content is empty")
 
-            wb = xlrd.open_workbook(file_contents=file_data)
-            sheet = wb.sheet_by_index(0)
+            # Normalize headers
+            df.columns = self._normalize_headers(df.columns.tolist())
 
-            return self._process_sheet(sheet)
+            # Convert to list of dicts
+            rows = df.to_dict("records")
+            return self._fill_missing_readings(rows, df.columns.tolist())
 
-        except xlrd.XLRDError as err:
-            raise ParserError(f"Failed to parse Excel file: {err}") from err
         except Exception as err:
-            raise ParserError(f"Unexpected error parsing file: {err}") from err
-
-    def _process_sheet(self, sheet: Sheet) -> list[dict[str, Any]]:
-        """Process an Excel sheet into normalized row dictionaries.
-
-        Args:
-            sheet: Excel worksheet to process
-
-        Returns:
-            List of normalized row dictionaries
-        """
-        headers = self._normalize_headers(sheet.row_values(0))
-        rows = []
-
-        for row_index in range(1, sheet.nrows):
-            row_values = sheet.row_values(row_index)
-            row_dict = {headers[i]: row_values[i] for i in range(len(headers))}
-            rows.append(row_dict)
-
-        return self._fill_missing_readings(rows, headers)
+            raise ParserError(f"Failed to process Excel file: {err}") from err
 
     def _normalize_headers(self, raw_headers: list[str]) -> list[str]:
         """Normalize Excel column headers.
@@ -116,7 +108,7 @@ class ExcelParser:
             List of normalized header strings
         """
         return [
-            header.strip().lower().replace("º", "").replace(" ", "_")
+            unidecode(header.strip().lower().replace("°", "").replace("º", "").replace(" ", "_"))
             for header in raw_headers
         ]
 
@@ -142,7 +134,7 @@ class ExcelParser:
             for column in reversed(headers):
                 reading_value = row_dict.get(column)
 
-                if not reading_value and previous_reading_value:
+                if (pd.isnull(reading_value) or reading_value == '') and previous_reading_value is not None:
                     row_dict[column] = (
                         previous_reading_value if column not in METADATA_COLUMNS else ""
                     )
@@ -164,6 +156,8 @@ class ExcelParser:
         """
         try:
             sensors = self._get_rows_as_dict()
+            print(sensors)
+
             devices: DeviceDict = {}
 
             for row in sensors:
@@ -185,9 +179,9 @@ class ExcelParser:
         Returns:
             Device object if successful, None if device type unknown
         """
-        location = row.get("ubicacion", "")
-        serial_number = row.get("n_serie", "")
-        device_type = row.get("tipo", "")
+        location = str(row.get("ubicacion", ""))
+        serial_number = str(row.get("n_serie", ""))
+        device_type = str(row.get("tipo", ""))
 
         device = self._create_device(device_type, serial_number, location)
         if not device:
@@ -252,11 +246,15 @@ class ExcelParser:
                 ):
                     in_previous_year = True
 
+                if in_previous_year:
+                    reading_date.replace(year=previous_year)
+
                 last_processed_date = reading_date
 
-                reading_value = (
-                    float(str(reading).replace(",", ".")) if reading else 0.0
-                )
+                if pd.isna(reading):
+                    reading_value = 0.0
+                else:
+                    reading_value = float(str(reading).replace(",", "."))
                 device.add_reading_value(reading_value, reading_date)
 
             except ValueError as err:
@@ -301,9 +299,4 @@ class ExcelParser:
             DATE_FORMAT,
         ).replace(tzinfo=timezone.utc)
 
-        if not last_processed_date:
-            return parsed_date.replace(year=self.current_year)
-
-        return parsed_date.replace(
-            year=previous_year if in_previous_year else self.current_year
-        )
+        return parsed_date
