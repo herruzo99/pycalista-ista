@@ -20,14 +20,8 @@ from typing import Final
 
 from .__version import __version__
 from .exception_classes import LoginError, ParserError, ServerError
-from .models import (
-    ColdWaterDevice,
-    Device,
-    HeatingDevice,
-    HotWaterDevice,
-    Reading,
-    WaterDevice,
-)
+from .models import (ColdWaterDevice, Device, HeatingDevice, HotWaterDevice,
+                     Reading, WaterDevice)
 from .pycalista_ista import PyCalistaIsta
 
 # Version information
