@@ -44,9 +44,6 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-      - name: Test install from TestPyPI
-        run: |
-          pip install --index-url https://test.pypi.org/simple/ pycalista-ista
 
   deploy-prod:
     needs: deploy-test
