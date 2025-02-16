@@ -1,7 +1,6 @@
 # PyCalista-ista
 
-[![PyPI version](https://badge.fury.io/py/pycalista-ista.svg)](https://badge.fury.io/py/pycalista-ista) [![Downloads](https://pepy.tech/badge/pycalista-ista)](https://pepy.tech/project/pycalista-ista) [![Downloads](https://pepy.tech/badge/pycalista-ista/month)](https://pepy.tech/project/pycalista-ista) [![Downloads](https://pepy.tech/badge/pycalista-ista/week)](https://pepy.tech/project/pycalista-ista)
-
+[![PyPI version](https://badge.fury.io/py/pycalista-ista.svg)](https://badge.fury.io/py/pycalista-ista) [![Downloads](https://pepy.tech/badge/pycalista-ista)](https://pepy.tech/project/pycalista-ista)
 [![GitHub issues](https://img.shields.io/github/issues/herruzo99/pycalista-ista?style=for-the-badge&logo=github)](https://github.com/herruzo99/pycalista-ista/issues)
 [![GitHub forks](https://img.shields.io/github/forks/herruzo99/pycalista-ista?style=for-the-badge&logo=github)](https://github.com/herruzo99/pycalista-ista)
 [![GitHub stars](https://img.shields.io/github/stars/herruzo99/pycalista-ista?style=for-the-badge&logo=github)](https://github.com/herruzo99/pycalista-ista)
