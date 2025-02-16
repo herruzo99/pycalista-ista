@@ -67,7 +67,7 @@ exclude_lines = [
 
 [tool.black]
 line-length = 88
-target-version = ['py312']
+target-version = ['py313']
 include = '\.pyi?$'
 
 [tool.isort]
