@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="pycalista-ista",
-    version="0.3.0",
+    version="0.3.1",
     author="Juan Herruzo",
     author_email="juan@herruzo.dev",
     description="Python library for the ista calista service.",
