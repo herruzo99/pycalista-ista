@@ -80,7 +80,7 @@ class Device:
         Raises:
             ValueError: If the reading value is negative
         """
-        if reading.reading < 0:
+        if reading.reading is not None and reading.reading < 0:
             raise ValueError(f"Reading cannot be negative: {reading}")
 
         if not self.history:
