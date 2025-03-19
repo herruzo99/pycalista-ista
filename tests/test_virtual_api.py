@@ -6,6 +6,7 @@ from http import HTTPStatus
 from io import BytesIO
 from unittest.mock import Mock, patch
 
+from pycalista_ista.models.device import Device
 import pytest
 import xlwt
 from requests.exceptions import RequestException
@@ -266,3 +267,124 @@ def test_pycalista_wrong_login(ista_client: PyCalistaIsta) -> None:
     """Test PyCalistaIsta login failure."""
     with pytest.raises(LoginError):
         ista_client.login()
+
+def test_interpolate_and_trim_device_reading_basic():
+    """Test basic interpolation with simple readings."""
+    api = VirtualApi("test@example.com", "password")
+    
+    # Create a device with some missing values
+    device = Device("12345", "Kitchen")
+    device.add_reading_value(100, datetime(2025, 1, 1))
+    device.add_reading_value(None, datetime(2025, 1, 2))
+    device.add_reading_value(None, datetime(2025, 1, 3))
+    device.add_reading_value(200, datetime(2025, 1, 4))
+    
+    fixed_device = api._interpolate_and_trim_device_reading(device)
+    
+    # Check that the interpolated device has the correct values
+    readings = sorted(fixed_device.history, key=lambda r: r.date)
+    assert len(readings) == 4
+    assert readings[0].reading == 100
+    assert readings[1].reading == 133.33  # Interpolated value for Jan 2
+    assert readings[2].reading == 166.67  # Interpolated value for Jan 3
+    assert readings[3].reading == 200
+
+
+def test_interpolate_and_trim_device_reading_no_change_needed():
+    """Test when no interpolation is needed."""
+    api = VirtualApi("test@example.com", "password")
+    
+    # Create a device with only valid readings
+    device = Device("12345", "Kitchen")
+    device.add_reading_value(100, datetime(2025, 1, 1))
+    device.add_reading_value(150, datetime(2025, 1, 2))
+    device.add_reading_value(200, datetime(2025, 1, 3))
+    
+    fixed_device = api._interpolate_and_trim_device_reading(device)
+    
+    # Verify no changes to readings
+    readings = sorted(fixed_device.history, key=lambda r: r.date)
+    assert len(readings) == 3
+    assert readings[0].reading == 100
+    assert readings[1].reading == 150
+    assert readings[2].reading == 200
+
+def test_interpolate_and_trim_device_reading_multiple_missing_sequences():
+    """Test interpolation with multiple sequences of missing values."""
+    api = VirtualApi("test@example.com", "password")
+    
+    device = Device("12345", "Kitchen")
+    device.add_reading_value(100, datetime(2025, 1, 1))
+    device.add_reading_value(None, datetime(2025, 1, 2))
+    device.add_reading_value(200, datetime(2025, 1, 3))
+    device.add_reading_value(None, datetime(2025, 1, 4))
+    device.add_reading_value(None, datetime(2025, 1, 5))
+    device.add_reading_value(400, datetime(2025, 1, 6))
+    
+    fixed_device = api._interpolate_and_trim_device_reading(device)
+
+    # Check that all sequences were interpolated correctly
+    readings = sorted(fixed_device.history, key=lambda r: r.date)
+    assert len(readings) == 6
+    assert readings[0].reading == 100
+    assert readings[1].reading == 150  # Interpolated value
+    assert readings[2].reading == 200
+    assert readings[3].reading == 266.67  # Interpolated value
+    assert readings[4].reading == 333.33  # Interpolated value
+    assert readings[5].reading == 400
+
+
+def test_interpolate_and_trim_device_reading_trim_start_end():
+    """Test trimming of missing values at start and end."""
+    api = VirtualApi("test@example.com", "password")
+    
+    # Add readings with NULL values at start and end
+    device = Device("12345", "Kitchen")
+    device.add_reading_value(None, datetime(2025, 1, 1))  # Should be trimmed
+    device.add_reading_value(100, datetime(2025, 1, 2))
+    device.add_reading_value(200, datetime(2025, 1, 3))
+    device.add_reading_value(None, datetime(2025, 1, 4))  # Should be trimmed
+    
+    fixed_device = api._interpolate_and_trim_device_reading(device)
+
+    # Check that null values at start and end were trimmed
+    readings = sorted(fixed_device.history, key=lambda r: r.date)
+    assert len(readings) == 2
+    assert readings[0].reading == 100
+    assert readings[1].reading == 200
+
+
+def test_interpolate_and_trim_device_reading_only_one_valid():
+    """Test case with only one valid reading."""
+    api = VirtualApi("test@example.com", "password")
+    
+    device = Device("12345", "Kitchen")
+    device.add_reading_value(None, datetime(2025, 1, 1))
+    device.add_reading_value(100, datetime(2025, 1, 2))
+    device.add_reading_value(None, datetime(2025, 1, 3))
+    
+    fixed_device = api._interpolate_and_trim_device_reading(device)
+
+    # Should only have the one valid reading
+    readings = sorted(fixed_device.history, key=lambda r: r.date)
+    assert len(readings) == 1
+    assert readings[0].reading == 100
+
+def test_interpolate_and_trim_device_reading_unsorted_dates():
+    """Test interpolation works correctly with unsorted input dates."""
+    api = VirtualApi("test@example.com", "password")
+    
+    # Add readings in unsorted order
+    device = Device("12345", "Kitchen")
+    device.add_reading_value(200, datetime(2025, 1, 3))
+    device.add_reading_value(None, datetime(2025, 1, 2))
+    device.add_reading_value(100, datetime(2025, 1, 1))
+    
+    fixed_device = api._interpolate_and_trim_device_reading(device)
+
+    # Check interpolation worked correctly despite unsorted input
+    readings = sorted(fixed_device.history, key=lambda r: r.date)
+    assert len(readings) == 3
+    assert readings[0].reading == 100
+    assert readings[1].reading == 150  # Interpolated value
+    assert readings[2].reading == 200

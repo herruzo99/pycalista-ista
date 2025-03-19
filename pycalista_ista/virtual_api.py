@@ -26,6 +26,7 @@ from requests.exceptions import RequestException
 from .const import DATA_URL, LOGIN_URL, USER_AGENT
 from .excel_parser import ExcelParser
 from .exception_classes import LoginError
+from .models import Device
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -211,9 +212,15 @@ class VirtualApi:
                     existing_device = merged_devices[serial_number]
                     for reading in device.history:
                         existing_device.add_reading(reading)
+                        
+        final_devices: DeviceDict = {}
+        
+        for serial_number, device in merged_devices.items():
+            final_devices[serial_number]= self._interpolate_and_trim_device_reading(device)
+                
 
         return merged_devices
-
+            
     def _preload_reading_metadata(self) -> None:
         """Preload reading metadata required for subsequent requests.
 
@@ -337,3 +344,75 @@ class VirtualApi:
             current_start = current_end
 
         return file_buffers
+    
+    def _interpolate_and_trim_device_reading(self, device: Device) -> Device:
+        """Creates a new device with linear interpolation of missing readings and
+        trimming of last missing readings.
+        
+        Args:
+            device (Device): Device to fix
+        Returns:
+            Device: Fixed device
+        """
+        # Create a new device with the same properties
+        fixed_device = Device(device.serial_number, device.location)
+        
+        # Step 1: Sort readings by date
+        sorted_readings = sorted(device.history, key=lambda r: r.date)
+        
+        # Step 2: Identify valid readings (non-null values)
+        valid_readings = [r for r in sorted_readings if r.reading is not None]
+        
+        # If there are fewer than 2 valid readings, we can't interpolate
+        if len(valid_readings) < 2:
+            # Just copy the valid readings as-is
+            for reading in valid_readings:
+                fixed_device.add_reading(reading)
+            return fixed_device
+        
+        # Step 3: Find the first and last valid reading date
+        first_valid_date = valid_readings[0].date
+        last_valid_date = valid_readings[-1].date
+        
+        # Step 4: Filter readings to only include those between first and last valid date
+        filtered_readings = [r for r in sorted_readings 
+                            if first_valid_date <= r.date <= last_valid_date]
+        
+        # Step 5: Create pairs of valid readings for interpolation
+        valid_reading_pairs = []
+        for i in range(len(valid_readings) - 1):
+            start_reading = valid_readings[i]
+            end_reading = valid_readings[i + 1]
+            valid_reading_pairs.append((start_reading, end_reading))
+        
+        # Step 6: Process each pair of valid readings
+        for start_reading, end_reading in valid_reading_pairs:
+            # Add the start reading
+            fixed_device.add_reading(start_reading)
+            
+            # Find readings that need interpolation between this pair
+            to_interpolate = [r for r in filtered_readings
+                            if start_reading.date < r.date < end_reading.date 
+                            and (r.reading is None or r.reading <= 0)]
+            
+            if to_interpolate:
+                # Calculate interpolation parameters
+                start_date = start_reading.date
+                end_date = end_reading.date
+                start_val = start_reading.reading
+                end_val = end_reading.reading
+                
+                time_span = (end_date - start_date).total_seconds()
+                value_span = end_val - start_val
+                
+                # Interpolate each missing reading
+                for r in sorted(to_interpolate, key=lambda x: x.date):
+                    elapsed_time = (r.date - start_date).total_seconds()
+                    fraction = elapsed_time / time_span
+                    interpolated_value = round(start_val + (value_span * fraction), 2)
+                    fixed_device.add_reading_value(interpolated_value, r.date)
+        
+        # Add the final valid reading
+        fixed_device.add_reading(valid_readings[-1])
+        
+        return fixed_device

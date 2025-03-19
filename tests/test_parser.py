@@ -57,27 +57,6 @@ def test_device_type_creation():
     device = excel_parser._create_device("Unknown Type", "12345", "Location")
     assert device is None
 
-
-def test_fill_missing_readings():
-    """Test filling of missing readings."""
-    excel_parser = ExcelParser(BytesIO(b""))
-    rows = [
-        {
-            "tipo": "Heating",
-            "n_serie": "12345",
-            "ubicacion": "Location",
-            "27/12": 10,
-            "28/12": "",
-            "29/12": 30,
-        }
-    ]
-    headers = ["tipo", "n_serie", "ubicacion", "27/12", "28/12", "29/12"]
-
-    filled_rows = excel_parser._fill_missing_readings(rows, headers)
-    print(filled_rows)
-    assert filled_rows[0]["28/12"] == 30  # Should fill with next available value
-
-
 @pytest.mark.parametrize(
     "excel_file,expected_devices,year",
     [
@@ -127,13 +106,13 @@ def test_get_consumption_data(
 
     # Test missing readings are handled
     dormitorio2 = history["141740933"]  # Has missing reading in 2023-12-29
-    assert all(reading.reading >= 0 for reading in dormitorio2.history)
+    assert all(reading.reading is None or reading.reading >= 0 for reading in dormitorio2.history)
 
     # Test water meter readings
     cold_water = history["414293326"]
     hot_water = history["414306286"]
-    assert all(reading.reading >= 0 for reading in cold_water.history)
-    assert all(reading.reading >= 0 for reading in hot_water.history)
+    assert all(reading.reading is None or reading.reading >= 0 for reading in cold_water.history)
+    assert all(reading.reading is None or reading.reading >= 0 for reading in hot_water.history)
 
 
 def test_parser_empty_file(tmp_path):

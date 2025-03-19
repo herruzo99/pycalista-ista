@@ -42,7 +42,7 @@ class Reading:
         Raises:
             ValueError: If reading is negative
         """
-        if self.reading < 0:
+        if  self.reading is not None and self.reading < 0:
             raise ValueError(f"Reading value cannot be negative: {self.reading}")
 
         # Convert naive datetime to UTC

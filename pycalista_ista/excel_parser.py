@@ -94,8 +94,7 @@ class ExcelParser:
             df.columns = self._add_year_to_dates(df.columns.tolist())
 
             # Convert to list of dicts
-            rows = df.to_dict("records")
-            return self._fill_missing_readings(rows, df.columns.tolist())
+            return df.to_dict("records")
 
         except Exception as err:
             raise ParserError(f"Failed to process Excel file: {err}") from err
@@ -143,41 +142,6 @@ class ExcelParser:
             )
             for header in raw_headers
         ]
-
-    def _fill_missing_readings(
-        self,
-        rows: list[dict[str, Any]],
-        headers: list[str],
-    ) -> list[dict[str, Any]]:
-        """Fill missing readings with next available value.
-
-        Args:
-            rows: Raw row dictionaries
-            headers: Normalized column headers
-
-        Returns:
-            Rows with missing readings filled
-        """
-        data = []
-
-        for row_dict in rows:
-            previous_reading_value = None
-
-            for column in reversed(headers):
-                reading_value = row_dict.get(column)
-
-                if (
-                    pd.isnull(reading_value) or reading_value == ""
-                ) and previous_reading_value is not None:
-                    row_dict[column] = (
-                        previous_reading_value if column not in METADATA_COLUMNS else ""
-                    )
-                elif column not in METADATA_COLUMNS:
-                    previous_reading_value = reading_value
-
-            data.append(row_dict)
-
-        return data
 
     def get_devices_history(self) -> DeviceDict:
         """Get device histories from Excel data.
@@ -268,7 +232,7 @@ class ExcelParser:
                     date_str,
                 )
                 if pd.isna(reading):
-                    reading_value = 0.0
+                    reading_value = None
                 else:
                     reading_value = float(str(reading).replace(",", "."))
                 device.add_reading_value(reading_value, reading_date)
