@@ -355,7 +355,7 @@ class VirtualApi:
             Device: Fixed device
         """
         # Create a new device with the same properties
-        fixed_device = Device(device.serial_number, device.location)
+        fixed_device = device.__class__(device.serial_number, device.location)
         
         # Step 1: Sort readings by date
         sorted_readings = sorted(device.history, key=lambda r: r.date)
