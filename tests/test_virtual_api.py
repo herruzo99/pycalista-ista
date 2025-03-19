@@ -6,13 +6,13 @@ from http import HTTPStatus
 from io import BytesIO
 from unittest.mock import Mock, patch
 
-from pycalista_ista.models.device import Device
 import pytest
 import xlwt
 from requests.exceptions import RequestException
 
 from pycalista_ista import ParserError, PyCalistaIsta, ServerError
 from pycalista_ista.exception_classes import LoginError
+from pycalista_ista.models.device import Device
 from pycalista_ista.models.heating_device import HeatingDevice
 from pycalista_ista.virtual_api import VirtualApi
 from tests.conftest import TEST_EMAIL
