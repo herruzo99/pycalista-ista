@@ -219,7 +219,7 @@ class VirtualApi:
             final_devices[serial_number]= self._interpolate_and_trim_device_reading(device)
                 
 
-        return merged_devices
+        return final_devices
             
     def _preload_reading_metadata(self) -> None:
         """Preload reading metadata required for subsequent requests.
