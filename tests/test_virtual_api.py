@@ -12,8 +12,7 @@ from requests.exceptions import RequestException
 
 from pycalista_ista import ParserError, PyCalistaIsta, ServerError
 from pycalista_ista.exception_classes import LoginError
-from pycalista_ista.models.device import Device
-from pycalista_ista.models.heating_device import HeatingDevice
+from pycalista_ista.models import ColdWaterDevice, Device, HeatingDevice, HotWaterDevice
 from pycalista_ista.virtual_api import VirtualApi
 from tests.conftest import TEST_EMAIL
 
@@ -288,6 +287,61 @@ def test_interpolate_and_trim_device_reading_basic():
     assert readings[1].reading == 133.33  # Interpolated value for Jan 2
     assert readings[2].reading == 166.67  # Interpolated value for Jan 3
     assert readings[3].reading == 200
+    assert fixed_device.location == "Kitchen"
+    assert fixed_device.serial_number == '12345'
+
+
+def test_interpolate_and_trim_device_keep_device_data():
+    """Test basic interpolation with simple readings."""
+    api = VirtualApi("test@example.com", "password")
+    
+    device_1 = Device("12345", "Kitchen")
+    fixed_device_1 = api._interpolate_and_trim_device_reading(device_1)
+    assert fixed_device_1.location == "Kitchen"
+    assert fixed_device_1.serial_number == '12345'
+    assert fixed_device_1.__class__ == Device
+
+    device_1 = Device("12345", None)
+    fixed_device_1 = api._interpolate_and_trim_device_reading(device_1)
+    assert fixed_device_1.location == ""
+    assert fixed_device_1.serial_number == '12345'
+    assert fixed_device_1.__class__ == Device
+
+    device_1 = HotWaterDevice("12345", "Kitchen")
+    fixed_device_1 = api._interpolate_and_trim_device_reading(device_1)
+    assert fixed_device_1.location == "Kitchen"
+    assert fixed_device_1.serial_number == '12345'
+    assert fixed_device_1.__class__ == HotWaterDevice
+
+    device_1 = HotWaterDevice("12345", None)
+    fixed_device_1 = api._interpolate_and_trim_device_reading(device_1)
+    assert fixed_device_1.location == ""
+    assert fixed_device_1.serial_number == '12345'
+    assert fixed_device_1.__class__ == HotWaterDevice
+
+    device_1 = ColdWaterDevice("12345", "Kitchen")
+    fixed_device_1 = api._interpolate_and_trim_device_reading(device_1)
+    assert fixed_device_1.location == "Kitchen"
+    assert fixed_device_1.serial_number == '12345'
+    assert fixed_device_1.__class__ == ColdWaterDevice
+
+    device_1 = ColdWaterDevice("12345", None)
+    fixed_device_1 = api._interpolate_and_trim_device_reading(device_1)
+    assert fixed_device_1.location == ""
+    assert fixed_device_1.serial_number == '12345'
+    assert fixed_device_1.__class__ == ColdWaterDevice
+
+    device_1 = HeatingDevice("12345", "Kitchen")
+    fixed_device_1 = api._interpolate_and_trim_device_reading(device_1)
+    assert fixed_device_1.location == "Kitchen"
+    assert fixed_device_1.serial_number == '12345'
+    assert fixed_device_1.__class__ == HeatingDevice
+
+    device_1 = HeatingDevice("12345", None)
+    fixed_device_1 = api._interpolate_and_trim_device_reading(device_1)
+    assert fixed_device_1.location == ""
+    assert fixed_device_1.serial_number == '12345'
+    assert fixed_device_1.__class__ == HeatingDevice
 
 
 def test_interpolate_and_trim_device_reading_no_change_needed():

@@ -93,6 +93,10 @@ class ExcelParser:
 
             df.columns = self._add_year_to_dates(df.columns.tolist())
 
+            # Fix metadata colums remove nan values
+            metadata_colums_list = list(METADATA_COLUMNS)
+            df[metadata_colums_list] = df[metadata_colums_list].fillna('')
+            
             # Convert to list of dicts
             return df.to_dict("records")
 
