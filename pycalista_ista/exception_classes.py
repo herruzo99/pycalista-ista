@@ -1,74 +1,71 @@
 """Custom exceptions for the PyCalistaIsta package.
 
-This module defines the custom exceptions used throughout the package
-for handling various error conditions that may occur during API
-interactions and data processing.
-
-Exceptions:
-    ServerError: Base exception for server-related errors
-    LoginError: Exception for authentication failures
-    ParserError: Exception for data parsing errors
+Defines custom exceptions for handling various error conditions during
+API interactions and data processing with the Ista Calista service.
 """
 
 from __future__ import annotations
 
 
-class ServerError(Exception):
-    """Base exception for server-related errors.
+class IstaApiError(Exception):
+    """Base exception for PyCalistaIsta errors.
 
-    This exception is raised when there are issues communicating with
-    the Ista Calista server or when unexpected server responses are received.
+    Indicates a general issue related to the Ista Calista API interaction.
     """
 
     def __init__(self, message: str | None = None) -> None:
-        """Initialize the exception.
+        """Initialize the base API error.
 
         Args:
-            message: Optional error message. If not provided, a default message is used.
+            message: Optional error message. Uses a default if not provided.
         """
-        self.message = message or "Server error occurred during the request"
-        super().__init__(self.message)
+        super().__init__(message or "An unspecified error occurred with the Ista Calista API")
 
-    def __str__(self) -> str:
-        """Return a string representation of the error.
 
-        Returns:
-            The error message.
+class IstaConnectionError(IstaApiError):
+    """Exception for network or connection issues.
+
+    Raised when there are problems connecting to the Ista Calista server,
+    such as network errors, timeouts, or DNS issues.
+    """
+
+    def __init__(self, message: str | None = None) -> None:
+        """Initialize the connection error.
+
+        Args:
+            message: Optional error message. Uses a default if not provided.
         """
-        return self.message
+        super().__init__(message or "Could not connect to the Ista Calista server")
 
 
-class LoginError(ServerError):
+class IstaLoginError(IstaApiError):
     """Exception for authentication failures.
 
-    This exception is raised when authentication with the Ista Calista
-    server fails, either due to invalid credentials or server issues.
+    Raised when login to the Ista Calista server fails, due to invalid
+    credentials, expired sessions, or server-side authentication issues.
     """
 
     def __init__(self, message: str | None = None) -> None:
-        """Initialize the exception.
+        """Initialize the login error.
 
         Args:
-            message: Optional error message. If not provided, a default message is used.
+            message: Optional error message. Uses a default if not provided.
         """
-        super().__init__(
-            message or "An authentication error occurred during the request"
-        )
+        super().__init__(message or "Authentication failed with the Ista Calista server")
 
 
-class ParserError(ServerError):
+class IstaParserError(IstaApiError):
     """Exception for data parsing errors.
 
-    This exception is raised when there are issues parsing the data
-    received from the Ista Calista server, typically with Excel files.
+    Raised when there are issues parsing the data received from the
+    Ista Calista server, typically problems with the Excel file format or content.
     """
 
     def __init__(self, message: str | None = None) -> None:
-        """Initialize the exception.
+        """Initialize the parser error.
 
         Args:
-            message: Optional error message. If not provided, a default message is used.
+            message: Optional error message. Uses a default if not provided.
         """
-        super().__init__(
-            message or "Error occurred during parsing of the request response"
-        )
+        super().__init__(message or "Failed to parse data received from Ista Calista")
+
