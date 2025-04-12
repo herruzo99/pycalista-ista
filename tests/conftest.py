@@ -7,8 +7,8 @@ from urllib.parse import quote
 
 import aiohttp
 import pytest
-import pytest_asyncio # Use pytest_asyncio for async fixtures
-from aioresponses import aioresponses # For mocking aiohttp requests
+import pytest_asyncio  # Use pytest_asyncio for async fixtures
+from aioresponses import aioresponses  # For mocking aiohttp requests
 
 from pycalista_ista import PyCalistaIsta
 from pycalista_ista.const import DATA_URL, LOGIN_URL
