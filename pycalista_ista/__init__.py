@@ -1,17 +1,7 @@
-"""Python client for Ista Calista utility monitoring.
+"""Async Python client for Ista Calista utility monitoring.
 
-This package provides a client for interacting with the Ista Calista
-virtual office, allowing retrieval and analysis of utility consumption
-data from various types of meters.
-
-Example:
-    ```python
-    from pycalista_ista import PyCalistaIsta
-
-    client = PyCalistaIsta("user@example.com", "password")
-    client.login()
-    devices = client.get_devices()
-    ```
+Provides a client for interacting with the Ista Calista virtual office,
+allowing retrieval and analysis of utility consumption data asynchronously.
 """
 
 from __future__ import annotations
@@ -19,7 +9,12 @@ from __future__ import annotations
 from typing import Final
 
 from .__version import __version__
-from .exception_classes import LoginError, ParserError, ServerError
+from .exception_classes import ( # Updated exception names
+    IstaApiError,
+    IstaConnectionError,
+    IstaLoginError,
+    IstaParserError,
+)
 from .models import (
     ColdWaterDevice,
     Device,
@@ -44,8 +39,10 @@ __all__ = [
     "ColdWaterDevice",
     "HeatingDevice",
     "Reading",
-    # Exceptions
-    "LoginError",
-    "ParserError",
-    "ServerError",
+    # Exceptions (Updated Names)
+    "IstaApiError",
+    "IstaConnectionError",
+    "IstaLoginError",
+    "IstaParserError",
 ]
+

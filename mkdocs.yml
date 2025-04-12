@@ -1,163 +1,158 @@
-site_name: "Python Calista Ista Api Documentation"
-repo_url: https://github.com/Ludy87/pycalista-ista/
-repo_name: Ludy87/pycalista-ista
-site_author: Ludy87
+# MkDocs Configuration for PyCalista-ista
 
-nav:
-  - Home: index.md
-  - PyCalistaIsta: pycalista_ista.md
-  - login_helper.md
-  - types.md
-  - exception_classes.md
+site_name: "PyCalista-ista Async Library"
+site_description: "Async Python client library for the Ista Calista service API."
+site_author: "Juan Herruzo"
+site_url: "https://herruzo99.github.io/pycalista-ista/" # Example GitHub Pages URL
 
-validation:
-  omitted_files: warn
-  absolute_links: warn
-  unrecognized_links: warn
-
-plugins:
-  - search
-  - minify:
-      minify_html: true
-      minify_js: true
-      minify_css: true
-      htmlmin_opts:
-        remove_comments: true
-      cache_safe: true
-  - git-revision-date-localized:
-      enable_creation_date: true
-      fallback_to_build_date: true
-  - git-committers:
-      repository: Ludy87/pycalista-ista
-      branch: main
-      token: !ENV ["GITHUB_TOKEN"]
-      exclude:
-        - README.md
-  - git-authors
-  - autorefs
-  - literate-nav:
-      nav_file: README.md
-      implicit_index: true
-  - mkdocstrings:
-      enabled: !ENV [MKDOCSTRINGS_ENABLED, true]
-      handlers:
-        python:
-          import:
-            # YORE: SOL 3.12: Replace `3.12` with `3` within line.
-            - url: https://docs.python.org/3.12/objects.inv
-              domains: [std, py]
-          paths: [src, scripts, .]
-          setup_commands:
-            - "import sys; sys.path.insert(0, 'src')"
-          options:
-            line_length: 80
-            docstring_options:
-              ignore_init_summary: true
-            docstring_section_style: list
-            members_order: source
-            heading_level: 2
-            inherited_members: true
-            merge_init_into_class: true
-            parameter_headings: true
-            separate_signature: true
-            show_bases: false
-            show_inheritance_diagram: true
-            show_root_heading: true
-            show_root_full_path: true
-            show_source: true
-            show_signature_annotations: true
-            show_symbol_type_heading: true
-            show_symbol_type_toc: true
-            signature_crossrefs: true
-            summary: true
-            docstring_style: numpy
+repo_url: https://github.com/herruzo99/pycalista-ista/
+repo_name: herruzo99/pycalista-ista
+edit_uri: edit/main/docs/ # Link to edit pages on GitHub
 
 theme:
   name: material
+  language: en
+  #logo: assets/logo.png # Add a logo if you have one
+  favicon: assets/favicon.png # Add a favicon if you have one
   icon:
-    logo: material/library
+    repo: fontawesome/brands/github
   features:
     - announce.dismiss
     - content.code.annotate
     - content.code.copy
+    # - content.tabs.link # Use if you have content tabs
     - content.tooltips
     - navigation.expand
     - navigation.footer
     - navigation.indexes
     - navigation.instant
-    - navigation.instant.progress
-    - navigation.instant.prefetch
     - navigation.path
-    # - navigation.sections
-    # - navigation.tabs
-    - navigation.tabs.sticky
-    # - navigation.top
+    # - navigation.prune # Hide sections not containing the current page
+    - navigation.sections
+    - navigation.tabs # Use tabs for top-level sections
+    - navigation.tabs.sticky # Keep tabs visible when scrolling
+    - navigation.top # Back-to-top button
     - search.highlight
-    - search.suggest
     - search.share
+    - search.suggest
     - toc.follow
+    # - toc.integrate # Integrate TOC in left sidebar (requires navigation.sections disabled)
   palette:
-    - media: "(prefers-color-scheme)"
-      toggle:
-        icon: material/brightness-auto
-        name: Switch to light mode
+    # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: teal
-      accent: purple
+      primary: teal # Or another primary color
+      accent: purple # Or another accent color
       toggle:
         icon: material/weather-sunny
         name: Switch to dark mode
+    # Palette toggle for dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: black
-      accent: lime
+      primary: blue grey # Or another primary color
+      accent: lime # Or another accent color
       toggle:
         icon: material/weather-night
-        name: Switch to system preference
+        name: Switch to light mode
+  font:
+    text: Roboto
+    code: Roboto Mono
+  # Custom CSS
+  # extra_css:
+  #   - stylesheets/extra.css
 
+# Navigation Structure
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Usage Guide: usage.md
+  - API Reference:
+    - Client (PyCalistaIsta): api/client.md # Example split
+    - Models (Device, Reading): api/models.md
+    - Exceptions: api/exceptions.md
+  - Contributing: CONTRIBUTING.md # Link CONTRIBUTING.md directly
+  - Changelog: CHANGELOG.md # Add if you maintain one
+
+# Markdown Extensions
 markdown_extensions:
   - admonition
-  - codehilite
   - attr_list
-  - github-callouts
-  # - callouts
   - footnotes
+  - md_in_html # Allow Markdown in HTML blocks
+  - pymdownx.arithmatex: # For math formulas if needed
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
   - pymdownx.details
-  - pymdownx.blocks.tab:
-      alternate_style: true
   - pymdownx.emoji:
       emoji_index: !!python/name:material.extensions.emoji.twemoji
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
-  - pymdownx.highlight:
+  - pymdownx.highlight: # Code highlighting
+      anchor_linenums: true
+      line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
-  - pymdownx.magiclink
-  - pymdownx.snippets:
-      base_path: [!relative $config_dir]
+  - pymdownx.keys
+  - pymdownx.magiclink:
+      repo_url_shorthand: true
+      user: herruzo99
+      repo: pycalista-ista
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets: # Include snippets from other files
       check_paths: true
-  - pymdownx.superfences
-  - pymdownx.tabbed:
+  - pymdownx.superfences: # Advanced fenced code blocks
+      custom_fences:
+        - name: mermaid # For Mermaid diagrams
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed: # Tabbed content
       alternate_style: true
-      slugify: !!python/object/apply:pymdownx.slugs.slugify
-        kwds:
-          case: lower
   - pymdownx.tasklist:
       custom_checkbox: true
   - pymdownx.tilde
-  - toc:
+  - toc: # Table of Contents generation
       permalink: true
-  - def_list
-  - tables
-  - pymdownx.highlight:
-      use_pygments: false
-      anchor_linenums: true
-  - pymdownx.snippets
-  - pymdownx.superfences
-  - mdx_gh_links:
-      user: Ludy87
-      repo: pycalista-ista
-  - mkdocs-click
+      slugify: !!python/name:pymdownx.slugs.uslugify # Unicode slugs
 
+# Plugins
+plugins:
+  - search # Built-in search
+  - mkdocstrings: # Auto-generate API docs from docstrings
+      handlers:
+        python:
+          options:
+            docstring_style: google # Match your docstring style
+            show_root_heading: true
+            show_source: true # Show link to source code
+            members_order: source
+            # Options for async display if needed by theme/extension
+            # separate_signature: true
+            # line_length: 80
+  - git-revision-date-localized: # Show last updated date
+      type: date
+      enable_creation_date: true
+  - minify: # Minify HTML, JS, CSS for production build
+      minify_html: true
+      minify_js: true
+      minify_css: true
+
+# Custom directories
+# extra:
+#   social:
+#     - icon: fontawesome/brands/github
+#       link: https://github.com/herruzo99
+#     - icon: fontawesome/brands/python
+#       link: https://pypi.org/project/pycalista-ista/
+
+# Copyright
+copyright: Copyright &copy; 2024 Juan Herruzo
+
+# Watch directories for auto-reload during development
 watch:
+  - pycalista_ista # Watch source code changes for mkdocstrings
   - docs
+  - mkdocs.yml
+  - README.md
+  - CONTRIBUTING.md
