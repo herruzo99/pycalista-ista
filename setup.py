@@ -38,7 +38,7 @@ setup(
             "pytest>=8.0.0",
             "pytest-asyncio>=0.23.0", # For testing async code
             "pytest-cov>=5.0.0",
-            "aresponses>=3.0.0", # For mocking aiohttp requests
+            "aioresponses>=0.7.4", # For mocking aiohttp requests
             "black>=24.0.0",
             "isort>=5.0.0",
             "mypy>=1.8.0",
