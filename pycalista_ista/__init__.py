@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Final
 
 from .__version import __version__
-from .exception_classes import ( # Updated exception names
+from .exception_classes import (  # Updated exception names
     IstaApiError,
     IstaConnectionError,
     IstaLoginError,

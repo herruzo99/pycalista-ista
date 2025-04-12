@@ -3,8 +3,8 @@
 from datetime import datetime, timezone
 from io import BytesIO
 
+import pandas as pd  # Import pandas for creating test dataframes
 import pytest
-import pandas as pd # Import pandas for creating test dataframes
 
 from pycalista_ista import ColdWaterDevice, HeatingDevice, HotWaterDevice
 from pycalista_ista.excel_parser import ExcelParser
