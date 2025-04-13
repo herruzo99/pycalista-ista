@@ -1,3 +1,3 @@
 """Module containing the version information for the project."""  # numpydoc ignore=EX01,ES01
 
-__version__ = "0.4.5"
+__version__ = "0.4.7"
