@@ -10,12 +10,11 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-from datetime import date, datetime, timedelta
-from typing import IO, Any, Final, TypeVar
+from datetime import date, timedelta
+from typing import Any, Final, TypeVar
 from urllib.parse import quote
 
 import aiohttp
-import pandas as pd
 from aiohttp import ClientError, ClientResponseError, ClientSession
 from yarl import URL
 
@@ -121,23 +120,6 @@ class VirtualApi:
                 text[:200], # Log beginning of response text
             )
 
-            # Check for potential session expiry/redirect to login page
-            # This check might need adjustment based on actual redirect behavior
-            if response.status == 200 and "text/html" in response.headers.get(
-                "Content-Type", ""
-            ):
-                # Heuristic: If we get HTML back on an API call, it might be login page
-                response_text = await response.text()
-                if "GestionOficinaVirtual.do" in response_text: # Check if it looks like the login page
-                    _LOGGER.warning("Detected potential session expiry, attempting relogin")
-                    if await self.relogin(): # Attempt relogin
-                        # Retry the original request *once* after successful relogin
-                        _LOGGER.debug("Relogin successful, retrying original request to %s", url)
-                        response = await self.session.request(method, url, **kwargs)
-                        _LOGGER.debug("Retry response status: %s", response.status)
-                    else:
-                        # Relogin failed, raise specific error
-                        raise IstaLoginError("Relogin failed, cannot complete request.")
 
             # Raise exception for non-success status codes after potential relogin
             response.raise_for_status()
@@ -239,7 +221,7 @@ class VirtualApi:
                 # content length > 0 on failure, unlike success which has no body.
                 # Check content length or analyze response content if necessary.
                 content_length = response.headers.get("Content-Length")
-                if content_length is not None and int(content_length) > 0:
+                if content_length is not None:
                     _LOGGER.warning("Login failed for %s (Content-Length > 0)", self.username)
                     raise IstaLoginError("Login failed - invalid credentials or server error")
 
