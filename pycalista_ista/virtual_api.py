@@ -120,7 +120,17 @@ class VirtualApi:
                 text[:200], # Log beginning of response text
             )
 
-
+            if response.status == 200 and "text/html" in response.headers.get(
+                "Content-Type", ""
+            ):
+                if await self.relogin(): # Attempt relogin
+                    # Retry the original request *once* after successful relogin
+                    _LOGGER.debug("Relogin successful, retrying original request to %s", url)
+                    response = await self.session.request(method, url, **kwargs)
+                    _LOGGER.debug("Retry response status: %s", response.status)
+                else:
+                    # Relogin failed, raise specific error
+                    raise IstaLoginError("Relogin failed, cannot complete request.")
             # Raise exception for non-success status codes after potential relogin
             response.raise_for_status()
             return response
@@ -302,9 +312,10 @@ class VirtualApi:
                 if "text/html" in content_type:
                     # This was already handled inside _send_request with a relogin attempt.
                     # If we reach here, the relogin likely failed or the page isn't the login page.
+                    text = await response.text()
                     _LOGGER.error(
                         "Received unexpected HTML content instead of Excel after potential relogin attempt. Content: %s",
-                        await response.text()[:500] # Log beginning of unexpected content
+                        text[:500] # Log beginning of unexpected content
                     )
                     raise IstaApiError(f"Received unexpected HTML content instead of Excel for {start} to {end}.")
 
