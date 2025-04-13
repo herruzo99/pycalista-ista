@@ -120,17 +120,7 @@ class VirtualApi:
                 text[:200], # Log beginning of response text
             )
 
-            if response.status == 200 and "text/html" in response.headers.get(
-                "Content-Type", ""
-            ):
-                if await self.relogin(): # Attempt relogin
-                    # Retry the original request *once* after successful relogin
-                    _LOGGER.debug("Relogin successful, retrying original request to %s", url)
-                    response = await self.session.request(method, url, **kwargs)
-                    _LOGGER.debug("Retry response status: %s", response.status)
-                else:
-                    # Relogin failed, raise specific error
-                    raise IstaLoginError("Relogin failed, cannot complete request.")
+
             # Raise exception for non-success status codes after potential relogin
             response.raise_for_status()
             return response

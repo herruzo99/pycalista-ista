@@ -110,27 +110,6 @@ async def test_get_readings_chunk_value_error(ista_api_client: VirtualApi):
          await ista_api_client._get_readings_chunk(start_dt, end_dt)
 
 
-@pytest.mark.parametrize(
-    "excel_file_content", ["consulta_2024-11-30_2025-01-01.xls"], indirect=True
-)
-async def test_get_readings_chunk_session_expired(
-    ista_api_client: VirtualApi,
-    mock_responses: aioresponses,
-    excel_file_content: bytes,
-):
-    """Test getting readings chunk with session expiry and successful relogin."""
-    start_dt = date(2024, 12, 1)
-    end_dt = date(2024, 12, 30)
-    start_str = start_dt.strftime("%d/%m/%Y")
-    end_str = end_dt.strftime("%d/%m/%Y")
-
-    # Configure mocks for expiry -> relogin -> success
-    mock_session_expiry_then_success(mock_responses, excel_file_content, start_str, end_str)
-
-    result_buffer = await ista_api_client._get_readings_chunk(start_dt, end_dt)
-    assert isinstance(result_buffer, BytesIO)
-    assert result_buffer.read() == excel_file_content
-
 
 @pytest.mark.parametrize(
     "excel_file_content", ["consulta_2024-11-30_2025-01-01.xls"], indirect=True
