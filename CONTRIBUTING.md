@@ -79,7 +79,7 @@ All contributions must adhere to these standards:
 ## Creating Releases (Maintainers)
 
 1.  Ensure `main` branch is up-to-date and all checks pass.
-2.  Update version number in `pycalista_ista/__version__.py` and `setup.py`.
+2.  Update version number in `pycalista_ista/__version__.py`.
 3.  Update `CHANGELOG.md` (if maintained).
 4.  Commit version bump: `git commit -m "chore: Bump version to vX.Y.Z"`
 5.  Create and push tag: `git tag -a vX.Y.Z -m "Release version X.Y.Z" && git push origin vX.Y.Z`

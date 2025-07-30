@@ -57,12 +57,12 @@ class PyCalistaIsta:
             raise ValueError("Email and password are required")
 
         self.account: str = email.strip()
-        self._password: str = password # Store password privately
-        self._close_session = session is None # Track if we need to close the session
+        self._password: str = password  # Store password privately
+        self._close_session = session is None  # Track if we need to close the session
         self._virtual_api = VirtualApi(
             username=self.account,
             password=self._password,
-            session=session, # Pass session to VirtualApi
+            session=session,  # Pass session to VirtualApi
         )
         _LOGGER.debug("PyCalistaIsta client initialized for %s", self.account)
 
@@ -99,13 +99,16 @@ class PyCalistaIsta:
             return True
         except IstaLoginError as err:
             _LOGGER.error("Async login failed for %s: %s", self.account, err)
-            raise # Re-raise specific login error
+            raise  # Re-raise specific login error
         except Exception as err:
             # Catch other potential errors from VirtualApi.login
-            _LOGGER.exception("Unexpected error during async login for %s", self.account)
+            _LOGGER.exception(
+                "Unexpected error during async login for %s", self.account
+            )
             # Wrap unexpected errors in a generic API error
-            raise IstaApiError(f"An unexpected error occurred during login: {err}") from err
-
+            raise IstaApiError(
+                f"An unexpected error occurred during login: {err}"
+            ) from err
 
     async def get_devices_history(
         self,
@@ -151,8 +154,10 @@ class PyCalistaIsta:
             )
             return devices
         except (ValueError, IstaLoginError, IstaApiError) as err:
-             # Catch known specific errors and re-raise
-            _LOGGER.error("Failed to get async device history for %s: %s", self.account, err)
+            # Catch known specific errors and re-raise
+            _LOGGER.error(
+                "Failed to get async device history for %s: %s", self.account, err
+            )
             raise
         except Exception as err:
             # Catch unexpected errors
@@ -162,4 +167,3 @@ class PyCalistaIsta:
             raise IstaApiError(
                 f"An unexpected error occurred while fetching device history: {err}"
             ) from err
-

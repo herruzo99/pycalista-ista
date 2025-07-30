@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from bisect import insort
 from datetime import datetime
-from typing import Final, Optional
+from typing import Final
 
 from .reading import Reading
 

@@ -19,7 +19,9 @@ class IstaApiError(Exception):
         Args:
             message: Optional error message. Uses a default if not provided.
         """
-        super().__init__(message or "An unspecified error occurred with the Ista Calista API")
+        super().__init__(
+            message or "An unspecified error occurred with the Ista Calista API"
+        )
 
 
 class IstaConnectionError(IstaApiError):
@@ -51,7 +53,9 @@ class IstaLoginError(IstaApiError):
         Args:
             message: Optional error message. Uses a default if not provided.
         """
-        super().__init__(message or "Authentication failed with the Ista Calista server")
+        super().__init__(
+            message or "Authentication failed with the Ista Calista server"
+        )
 
 
 class IstaParserError(IstaApiError):
@@ -68,4 +72,3 @@ class IstaParserError(IstaApiError):
             message: Optional error message. Uses a default if not provided.
         """
         super().__init__(message or "Failed to parse data received from Ista Calista")
-

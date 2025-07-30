@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 import pytest
 
 from pycalista_ista.models.device import Device
-from pycalista_ista.models.reading import Reading
 
 
 def test_device_initialization():

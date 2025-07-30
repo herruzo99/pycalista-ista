@@ -14,37 +14,37 @@ with open("README.md", encoding="utf-8") as f:
 setup(
     name="pycalista-ista",
     # Use the version variable loaded from __version.py
-    version=__version__, # type: ignore[name-defined]  # noqa: F821
+    version=__version__,  # type: ignore[name-defined]  # noqa: F821
     author="Juan Herruzo",
     author_email="juan@herruzo.dev",
     description="Async Python library for the ista Calista service.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/herruzo99/pycalista-ista",
-    packages=find_packages(exclude=["tests", "docs"]), # Exclude tests and docs
+    packages=find_packages(exclude=["tests", "docs"]),  # Exclude tests and docs
     # Core dependencies
     install_requires=[
-        "aiohttp>=3.9.0", # Added aiohttp for async requests
+        "aiohttp>=3.9.0",  # Added aiohttp for async requests
         "pandas>=2.0.0",  # For Excel parsing
-        "unidecode>=1.0.0", # For header normalization
-        "yarl>=1.8.0", # Dependency of aiohttp, good practice to list it
+        "unidecode>=1.0.0",  # For header normalization
+        "yarl>=1.8.0",  # Dependency of aiohttp, good practice to list it
         # xlrd is NOT needed if using pandas with openpyxl for xlsx
         # Consider adding openpyxl if xlsx support is primary
-        "openpyxl>=3.0.0", # Add openpyxl for .xlsx support in pandas
+        "openpyxl>=3.0.0",  # Add openpyxl for .xlsx support in pandas
     ],
     # Development dependencies
     extras_require={
         "dev": [
             "pytest>=8.0.0",
-            "pytest-asyncio>=0.23.0", # For testing async code
+            "pytest-asyncio>=0.23.0",  # For testing async code
             "pytest-cov>=5.0.0",
-            "aioresponses>=0.7.4", # For mocking aiohttp requests
+            "aioresponses>=0.7.4",  # For mocking aiohttp requests
             "black>=24.0.0",
             "isort>=5.0.0",
             "mypy>=1.8.0",
-            "ruff>=0.3.0", # Linter
-            "types-aiohttp", # Type hints for aiohttp
-            "types-requests", # Although requests removed, useful for context
+            "ruff>=0.3.0",  # Linter
+            "types-aiohttp",  # Type hints for aiohttp
+            "types-requests",  # Although requests removed, useful for context
         ],
         "docs": [
             "mkdocs>=1.5.0",
@@ -54,13 +54,13 @@ setup(
         ],
     },
     classifiers=[
-        "Development Status :: 4 - Beta", # Update status as appropriate
+        "Development Status :: 4 - Beta",  # Update status as appropriate
         "Intended Audience :: Developers",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.12", # Specify supported versions
+        "Programming Language :: Python :: 3.12",  # Specify supported versions
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
-        "Framework :: AsyncIO", # Indicate async support
+        "Framework :: AsyncIO",  # Indicate async support
         "Topic :: Software Development :: Libraries :: Python Modules",
         "Topic :: Home Automation",
     ],
@@ -70,7 +70,7 @@ setup(
     # entry_points={ ... },
     include_package_data=True,
     package_data={
-        "pycalista_ista": ["py.typed"], # Add py.typed for PEP 561 compliance
+        "pycalista_ista": ["py.typed"],  # Add py.typed for PEP 561 compliance
     },
     # Add keywords for discoverability on PyPI
     keywords=["ista", "calista", "home assistant", "iot", "energy", "water", "asyncio"],

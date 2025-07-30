@@ -10,12 +10,11 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-from datetime import date, datetime, timedelta
-from typing import IO, Any, Final, TypeVar
+from datetime import date, timedelta
+from typing import Any, Final, TypeVar
 from urllib.parse import quote
 
 import aiohttp
-import pandas as pd
 from aiohttp import ClientError, ClientResponseError, ClientSession
 from yarl import URL
 
@@ -118,7 +117,7 @@ class VirtualApi:
                 "Received response %s from %s: %s",
                 response.status,
                 url,
-                text[:200], # Log beginning of response text
+                text[:200],  # Log beginning of response text
             )
 
             # Check for potential session expiry/redirect to login page
@@ -128,11 +127,17 @@ class VirtualApi:
             ):
                 # Heuristic: If we get HTML back on an API call, it might be login page
                 response_text = await response.text()
-                if "GestionOficinaVirtual.do" in response_text: # Check if it looks like the login page
-                    _LOGGER.warning("Detected potential session expiry, attempting relogin")
-                    if await self.relogin(): # Attempt relogin
+                if (
+                    "GestionOficinaVirtual.do" in response_text
+                ):  # Check if it looks like the login page
+                    _LOGGER.warning(
+                        "Detected potential session expiry, attempting relogin"
+                    )
+                    if await self.relogin():  # Attempt relogin
                         # Retry the original request *once* after successful relogin
-                        _LOGGER.debug("Relogin successful, retrying original request to %s", url)
+                        _LOGGER.debug(
+                            "Relogin successful, retrying original request to %s", url
+                        )
                         response = await self.session.request(method, url, **kwargs)
                         _LOGGER.debug("Retry response status: %s", response.status)
                     else:
@@ -154,7 +159,9 @@ class VirtualApi:
                 )
                 await asyncio.sleep(wait_time)
                 # Decrement retry counter for the recursive call
-                return await self._send_request(method, url, retry_attempts - 1, **kwargs)
+                return await self._send_request(
+                    method, url, retry_attempts - 1, **kwargs
+                )
             _LOGGER.error(
                 "Request failed with status %s after retries or for unrecoverable status: %s",
                 err.status,
@@ -175,11 +182,13 @@ class VirtualApi:
                 )
                 await asyncio.sleep(wait_time)
                 # Decrement retry counter for the recursive call
-                return await self._send_request(method, url, retry_attempts - 1, **kwargs)
+                return await self._send_request(
+                    method, url, retry_attempts - 1, **kwargs
+                )
             _LOGGER.error("Request failed with client error after retries: %s", err)
             raise IstaConnectionError(f"Request failed: {err}") from err
         except asyncio.TimeoutError as err:
-             # Handle timeout errors specifically
+            # Handle timeout errors specifically
             if retry_attempts > 0:
                 wait_time = RETRY_BACKOFF * (MAX_RETRIES - retry_attempts + 1)
                 _LOGGER.warning(
@@ -189,10 +198,11 @@ class VirtualApi:
                 )
                 await asyncio.sleep(wait_time)
                 # Decrement retry counter for the recursive call
-                return await self._send_request(method, url, retry_attempts - 1, **kwargs)
+                return await self._send_request(
+                    method, url, retry_attempts - 1, **kwargs
+                )
             _LOGGER.error("Request timed out after retries")
             raise IstaConnectionError("Request timed out") from err
-
 
     async def relogin(self) -> bool:
         """Perform a fresh login, clearing old session state if necessary.
@@ -240,8 +250,12 @@ class VirtualApi:
                 # Check content length or analyze response content if necessary.
                 content_length = response.headers.get("Content-Length")
                 if content_length is not None and int(content_length) > 0:
-                    _LOGGER.warning("Login failed for %s (Content-Length > 0)", self.username)
-                    raise IstaLoginError("Login failed - invalid credentials or server error")
+                    _LOGGER.warning(
+                        "Login failed for %s (Content-Length > 0)", self.username
+                    )
+                    raise IstaLoginError(
+                        "Login failed - invalid credentials or server error"
+                    )
 
                 _LOGGER.info("Login successful for %s", self.username)
                 # Preload metadata needed for data downloads
@@ -251,9 +265,9 @@ class VirtualApi:
             except (ClientError, asyncio.TimeoutError) as err:
                 _LOGGER.error("Login request failed for %s: %s", self.username, err)
                 raise IstaConnectionError(f"Login request failed: {err}") from err
-            except IstaLoginError: # Re-raise specific login errors
+            except IstaLoginError:  # Re-raise specific login errors
                 raise
-    
+
     async def _preload_reading_metadata(self) -> None:
         """Preload reading metadata required for subsequent requests (async).
 
@@ -269,7 +283,6 @@ class VirtualApi:
         except (ClientError, asyncio.TimeoutError, IstaConnectionError) as err:
             _LOGGER.error("Failed to preload metadata: %s", err)
             # Let the specific exception type bubble up
-
 
     async def _get_readings_chunk(
         self,
@@ -299,7 +312,7 @@ class VirtualApi:
                 f"Date range exceeds maximum {max_days} days: {delta_days} days"
             )
         if delta_days < 0:
-             raise ValueError("Start date must be before end date")
+            raise ValueError("Start date must be before end date")
 
         _LOGGER.debug("Fetching readings chunk from %s to %s", start, end)
 
@@ -308,7 +321,7 @@ class VirtualApi:
             "fechaHastaRadio": quote(end.strftime(DATE_FORMAT)),
             "metodo": "listadoLecturasRadio",
             "fechaDesdeRadio": quote(start.strftime(DATE_FORMAT)),
-            "6578706f7274": "1", # Export flag
+            "6578706f7274": "1",  # Export flag
         }
 
         try:
@@ -322,14 +335,19 @@ class VirtualApi:
                     # If we reach here, the relogin likely failed or the page isn't the login page.
                     _LOGGER.error(
                         "Received unexpected HTML content instead of Excel after potential relogin attempt. Content: %s",
-                        await response.text()[:500] # Log beginning of unexpected content
+                        await response.text()[
+                            :500
+                        ],  # Log beginning of unexpected content
                     )
-                    raise IstaApiError(f"Received unexpected HTML content instead of Excel for {start} to {end}.")
+                    raise IstaApiError(
+                        f"Received unexpected HTML content instead of Excel for {start} to {end}."
+                    )
 
                 # Handle other unexpected content types
                 _LOGGER.error(
                     "Unexpected content type received: %s. Expected '%s'.",
-                    content_type, EXCEL_CONTENT_TYPE
+                    content_type,
+                    EXCEL_CONTENT_TYPE,
                 )
                 raise IstaApiError(f"Unexpected content type: {content_type}")
 
@@ -337,10 +355,17 @@ class VirtualApi:
             content = await response.read()
             return io.BytesIO(content)
 
-        except (ClientError, asyncio.TimeoutError, IstaConnectionError, IstaLoginError, IstaApiError) as err:
-            _LOGGER.error("Failed to get readings chunk from %s to %s: %s", start, end, err)
-            raise # Re-raise the caught exception
-
+        except (
+            ClientError,
+            asyncio.TimeoutError,
+            IstaConnectionError,
+            IstaLoginError,
+            IstaApiError,
+        ) as err:
+            _LOGGER.error(
+                "Failed to get readings chunk from %s to %s: %s", start, end, err
+            )
+            raise  # Re-raise the caught exception
 
     async def _get_readings(
         self,
@@ -373,23 +398,32 @@ class VirtualApi:
         while current_start <= end:
             # Calculate end date for the current chunk
             # Ensure we don't exceed the overall end date
-            current_end = min(current_start + timedelta(days=max_days -1), end) # -1 because timedelta includes start day
+            current_end = min(
+                current_start + timedelta(days=max_days - 1), end
+            )  # -1 because timedelta includes start day
 
             _LOGGER.info("Requesting data chunk: %s to %s", current_start, current_end)
 
             try:
                 # Fetch the chunk asynchronously
-                file_buffer = await self._get_readings_chunk(current_start, current_end, max_days)
+                file_buffer = await self._get_readings_chunk(
+                    current_start, current_end, max_days
+                )
                 # Store the buffer along with the *end* year for the parser context
                 file_buffers.append((current_end.year, file_buffer))
-            except (IstaConnectionError, IstaLoginError, IstaApiError, ValueError) as err:
+            except (
+                IstaConnectionError,
+                IstaLoginError,
+                IstaApiError,
+                ValueError,
+            ) as err:
                 _LOGGER.error(
                     "Failed to get readings for chunk %s to %s: %s",
                     current_start,
                     current_end,
                     err,
                 )
-                raise # Propagate the error to stop the process
+                raise  # Propagate the error to stop the process
 
             # Move to the next day after the current chunk's end date
             current_start = current_end + timedelta(days=1)
@@ -427,8 +461,12 @@ class VirtualApi:
             current_year_file_buffers = await self._get_readings(start, end)
 
             if not current_year_file_buffers:
-                 _LOGGER.warning("No data files retrieved from Ista for the period %s to %s", start, end)
-                 return {} # Return empty dict if no files were fetched
+                _LOGGER.warning(
+                    "No data files retrieved from Ista for the period %s to %s",
+                    start,
+                    end,
+                )
+                return {}  # Return empty dict if no files were fetched
 
             device_lists: list[DeviceDict] = []
             loop = asyncio.get_running_loop()
@@ -448,24 +486,34 @@ class VirtualApi:
                 if isinstance(result, Exception):
                     _LOGGER.error("Error during Excel parsing: %s", result)
                     # Raise the first encountered parser error
-                    raise IstaParserError("Failed to parse one or more Excel files") from result
+                    raise IstaParserError(
+                        "Failed to parse one or more Excel files"
+                    ) from result
                 if isinstance(result, dict):
-                     device_lists.append(result)
+                    device_lists.append(result)
                 else:
                     # Should not happen if gather returns correctly
-                    _LOGGER.error("Unexpected result type from parser task: %s", type(result))
+                    _LOGGER.error(
+                        "Unexpected result type from parser task: %s", type(result)
+                    )
                     raise IstaParserError("Unexpected result during parsing.")
-
 
             # Merge the results from different files/chunks
             merged_devices = self.merge_device_histories(device_lists)
-            _LOGGER.info("Successfully merged history for %d devices", len(merged_devices))
+            _LOGGER.info(
+                "Successfully merged history for %d devices", len(merged_devices)
+            )
             return merged_devices
 
-        except (IstaConnectionError, IstaLoginError, IstaParserError, IstaApiError, ValueError) as err:
+        except (
+            IstaConnectionError,
+            IstaLoginError,
+            IstaParserError,
+            IstaApiError,
+            ValueError,
+        ) as err:
             _LOGGER.error("Failed to get complete device history: %s", err)
-            raise # Re-raise the specific error
-
+            raise  # Re-raise the specific error
 
     def merge_device_histories(self, device_lists: list[DeviceDict]) -> DeviceDict:
         """Merge device histories from multiple time periods.
@@ -492,8 +540,7 @@ class VirtualApi:
                 if serial_number not in merged_devices:
                     # Create a new instance of the correct device type
                     merged_devices[serial_number] = device.__class__(
-                        serial_number=device.serial_number,
-                        location=device.location
+                        serial_number=device.serial_number, location=device.location
                     )
 
                 existing_device = merged_devices[serial_number]
@@ -508,21 +555,27 @@ class VirtualApi:
         final_devices: DeviceDict = {}
         for serial_number, device in merged_devices.items():
             try:
-                final_devices[serial_number] = self._interpolate_and_trim_device_reading(device)
+                final_devices[serial_number] = (
+                    self._interpolate_and_trim_device_reading(device)
+                )
             except Exception as e:
-                _LOGGER.error("Error interpolating device %s: %s", serial_number, e, exc_info=True)
+                _LOGGER.error(
+                    "Error interpolating device %s: %s", serial_number, e, exc_info=True
+                )
                 # Optionally, decide whether to include the non-interpolated device or skip it
                 # For now, we'll skip it to avoid potentially corrupted data
-                _LOGGER.warning("Skipping device %s due to interpolation error.", serial_number)
+                _LOGGER.warning(
+                    "Skipping device %s due to interpolation error.", serial_number
+                )
 
-
-        _LOGGER.debug("Finished merging histories into %d final devices", len(final_devices))
+        _LOGGER.debug(
+            "Finished merging histories into %d final devices", len(final_devices)
+        )
         return final_devices
-
 
     def _interpolate_and_trim_device_reading(self, device: Device) -> Device:
         """Creates a new device with linear interpolation of missing readings and
-        trimming of last missing readings.
+        trimming of last missing readings, applying special rules.
 
         Args:
             device (Device): Device to fix
@@ -533,82 +586,109 @@ class VirtualApi:
         Raises:
             ValueError: If device type is unknown or interpolation fails.
         """
-        _LOGGER.debug("Interpolating and trimming readings for device %s", device.serial_number)
-        # Create a new device instance of the same type
+        _LOGGER.debug(
+            "Interpolating and trimming readings for device %s", device.serial_number
+        )
         try:
             fixed_device = device.__class__(device.serial_number, device.location)
         except TypeError as e:
-             raise ValueError(f"Could not instantiate device class {device.__class__.__name__}") from e
+            raise ValueError(
+                f"Could not instantiate device class {device.__class__.__name__}"
+            ) from e
 
-        # Step 1: Sort readings by date
         sorted_readings = sorted(device.history, key=lambda r: r.date)
+        valid_readings = [
+            r for r in sorted_readings if r.reading is not None and r.reading >= 0
+        ]
 
-        # Step 2: Identify valid readings (non-null and non-negative values)
-        valid_readings = [r for r in sorted_readings if r.reading is not None and r.reading >= 0]
-
-        # If there are fewer than 2 valid readings, we can't interpolate
         if len(valid_readings) < 2:
-            _LOGGER.debug("Less than 2 valid readings for %s, skipping interpolation.", device.serial_number)
-            # Just copy the valid readings as-is
+            _LOGGER.debug(
+                "Less than 2 valid readings for %s, skipping interpolation.",
+                device.serial_number,
+            )
             for reading in valid_readings:
                 fixed_device.add_reading(reading)
             return fixed_device
 
-        # Step 3: Find the first and last valid reading date
         first_valid_date = valid_readings[0].date
         last_valid_date = valid_readings[-1].date
+        filtered_readings = [
+            r for r in sorted_readings if first_valid_date <= r.date <= last_valid_date
+        ]
 
-        # Step 4: Filter readings to only include those between first and last valid date
-        filtered_readings = [r for r in sorted_readings
-                            if first_valid_date <= r.date <= last_valid_date]
-
-        # Step 5: Create pairs of consecutive valid readings for interpolation
         valid_reading_pairs = []
         for i in range(len(valid_readings) - 1):
-            start_reading = valid_readings[i]
-            end_reading = valid_readings[i + 1]
-            valid_reading_pairs.append((start_reading, end_reading))
+            valid_reading_pairs.append((valid_readings[i], valid_readings[i + 1]))
 
-        # Step 6: Process each pair of valid readings
         interpolated_count = 0
         for start_reading, end_reading in valid_reading_pairs:
-            # Add the start reading (avoid duplicates if it was the end of previous pair)
-            if not fixed_device.history or fixed_device.history[-1].date != start_reading.date:
-                 fixed_device.add_reading(start_reading)
+            if (
+                not fixed_device.history
+                or fixed_device.history[-1].date != start_reading.date
+            ):
+                fixed_device.add_reading(start_reading)
 
-            # Find readings that need interpolation between this pair
-            to_interpolate = [r for r in filtered_readings
-                            if start_reading.date < r.date < end_reading.date
-                            and (r.reading is None or r.reading < 0)] # Interpolate None or negative
+            to_interpolate = [
+                r
+                for r in filtered_readings
+                if start_reading.date < r.date < end_reading.date
+                and (r.reading is None or r.reading < 0)
+            ]
 
             if to_interpolate:
-                # Calculate interpolation parameters
-                start_date_ts = start_reading.date.timestamp()
-                end_date_ts = end_reading.date.timestamp()
                 start_val = start_reading.reading
                 end_val = end_reading.reading
+
+                if end_val < start_val:
+                    _LOGGER.info(
+                        "Detected a reset for device %s (from %s to %s). Interpolating missing values as 0.",
+                        device.serial_number,
+                        start_val,
+                        end_val,
+                    )
+                    for r in sorted(to_interpolate, key=lambda x: x.date):
+                        fixed_device.add_reading_value(0, r.date)
+                        interpolated_count += 1
+                    continue  # Move to the next pair of valid readings
+
+                start_date_ts = start_reading.date.timestamp()
+                end_date_ts = end_reading.date.timestamp()
 
                 time_span = end_date_ts - start_date_ts
                 value_span = end_val - start_val
 
-                # Avoid division by zero if timestamps are identical (shouldn't happen with < check)
                 if time_span == 0:
-                    _LOGGER.warning("Skipping interpolation for %s between identical timestamps: %s",
-                                    device.serial_number, start_reading.date)
+                    _LOGGER.warning(
+                        "Skipping interpolation for %s between identical timestamps: %s",
+                        device.serial_number,
+                        start_reading.date,
+                    )
                     continue
 
-                # Interpolate each missing reading
                 for r in sorted(to_interpolate, key=lambda x: x.date):
                     elapsed_time = r.date.timestamp() - start_date_ts
                     fraction = elapsed_time / time_span
-                    interpolated_value = round(start_val + (value_span * fraction), 2)
-                    fixed_device.add_reading_value(interpolated_value, r.date)
+
+                    # Calculate with higher precision to avoid rounding errors
+                    # e.g., 106.554 + 0 should not become 106.55
+                    interpolated_value = round(start_val + (value_span * fraction), 4)
+
+                    # Rule 2: Enforce boundary to prevent float errors
+                    # This ensures value is not < start_val or > end_val
+                    final_value = max(start_val, min(end_val, interpolated_value))
+
+                    fixed_device.add_reading_value(final_value, r.date)
                     interpolated_count += 1
 
-        # Add the final valid reading (avoid duplicates)
-        if not fixed_device.history or fixed_device.history[-1].date != valid_readings[-1].date:
+        if (
+            not fixed_device.history
+            or fixed_device.history[-1].date != valid_readings[-1].date
+        ):
             fixed_device.add_reading(valid_readings[-1])
 
-        _LOGGER.debug("Interpolated %d readings for device %s", interpolated_count, device.serial_number)
+        _LOGGER.debug(
+            "Interpolated %d readings for device %s",
+            interpolated_count,
+            device.serial_number,
+        )
         return fixed_device
-
