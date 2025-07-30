@@ -29,7 +29,6 @@ from .exception_classes import (
 from .models import Device
 
 _LOGGER = logging.getLogger(__name__)
-
 # Type variable for device history dictionaries
 DeviceDict = TypeVar("DeviceDict", bound=dict[str, Device])
 
@@ -88,6 +87,7 @@ class VirtualApi:
         method: str,
         url: str | URL,
         retry_attempts: int = MAX_RETRIES,
+        relogin: bool = True,
         **kwargs: Any,
     ) -> aiohttp.ClientResponse:
         """Send an HTTP request with the session, including retry logic.
@@ -122,13 +122,13 @@ class VirtualApi:
 
             # Check for potential session expiry/redirect to login page
             # This check might need adjustment based on actual redirect behavior
-            if response.status == 200 and "text/html" in response.headers.get(
-                "Content-Type", ""
-            ):
+            if response.status == 200:
                 # Heuristic: If we get HTML back on an API call, it might be login page
                 response_text = await response.text()
                 if (
                     "GestionOficinaVirtual.do" in response_text
+                    and 'type="password"' in response_text
+                    and relogin
                 ):  # Check if it looks like the login page
                     _LOGGER.warning(
                         "Detected potential session expiry, attempting relogin"
@@ -243,7 +243,9 @@ class VirtualApi:
             }
 
             try:
-                response = await self._send_request("POST", LOGIN_URL, data=data)
+                response = await self._send_request(
+                    "POST", LOGIN_URL, data=data, relogin=False
+                )
 
                 # Check for indicators of login failure. Ista returns 200 OK but with
                 # content length > 0 on failure, unlike success which has no body.
