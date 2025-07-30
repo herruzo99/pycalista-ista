@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pycalista-ista"
-version = "0.5.2"
+version = "0.5.3"
 description = "Python library for the ista calista service"
 authors = [{name = "Juan Herruzo", email = "juan@herruzo.dev"}]
 license = {text = "MIT"}
