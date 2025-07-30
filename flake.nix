@@ -56,6 +56,7 @@
           packages = with pkgs; [
             pythonWithProjectDeps
             pre-commit
+            ruff
           ];
 
           # Hook to run when entering the shell.
