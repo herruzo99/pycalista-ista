@@ -156,8 +156,8 @@ def mock_session_expiry_then_success(
     mock_resp.get(
         url,
         status=200,
-        headers={"Content-Type": "text/html"},
-        body=b"<html>Redirect to GestionOficinaVirtual.do</html>",
+        headers={},
+        body=b"<html>Redirect to GestionOficinaVirtual.do <input 'type=\"password\"'/></html>",
         repeat=1,
     )
 

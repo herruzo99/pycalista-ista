@@ -337,7 +337,7 @@ class VirtualApi:
                     # If we reach here, the relogin likely failed or the page isn't the login page.
                     _LOGGER.error(
                         "Received unexpected HTML content instead of Excel after potential relogin attempt. Content: %s",
-                        await response.text()[
+                        (await response.text())[
                             :500
                         ],  # Log beginning of unexpected content
                     )
