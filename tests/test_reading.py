@@ -2,8 +2,6 @@
 
 from datetime import datetime, timezone
 
-import pytest
-
 from pycalista_ista.models.reading import Reading
 
 
