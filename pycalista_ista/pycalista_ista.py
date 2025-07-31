@@ -14,7 +14,8 @@ from typing import Final
 from aiohttp import ClientSession
 
 from .__version import __version__
-from .exception_classes import IstaApiError, IstaLoginError
+from .const import LOG_LEVEL_MAP
+from .exception_classes import IstaApiError, IstaConnectionError, IstaLoginError
 from .models import Device
 from .virtual_api import VirtualApi
 
@@ -64,12 +65,39 @@ class PyCalistaIsta:
             password=self._password,
             session=session,  # Pass session to VirtualApi
         )
-        _LOGGER.debug("PyCalistaIsta client initialized for %s", self.account)
+        _LOGGER.debug(
+            "PyCalistaIsta client initialized for %s. Session will be managed internally: %s",
+            self.account,
+            self._close_session,
+        )
 
     async def close(self) -> None:
         """Close the underlying API session if managed internally."""
         await self._virtual_api.close()
-        _LOGGER.debug("PyCalistaIsta session closed for %s", self.account)
+        _LOGGER.debug("PyCalistaIsta client for %s has been closed.", self.account)
+
+    def set_log_level(self, log_level: str) -> None:
+        """Set the logging level for the entire pycalista_ista library.
+
+        Args:
+            log_level: The desired log level ("DEBUG", "INFO", "WARNING", "ERROR").
+
+        Raises:
+            ValueError: If the provided log_level is invalid.
+        """
+        level_int = LOG_LEVEL_MAP.get(log_level.upper())
+        if level_int is None:
+            _LOGGER.error("Invalid log level provided: '%s'", log_level)
+            raise ValueError(
+                f"Invalid log level: {log_level}. Must be one of {list(LOG_LEVEL_MAP.keys())}"
+            )
+
+        # Get the root logger for this package and set its level.
+        # This will affect all loggers within the 'pycalista_ista' namespace.
+        package_logger = logging.getLogger(__name__.split(".")[0])
+        package_logger.setLevel(level_int)
+        # Log at the new level to confirm it's working
+        package_logger.info("pycalista_ista log level set to %s", log_level.upper())
 
     def get_version(self) -> str:
         """Get the client version.
@@ -90,20 +118,27 @@ class PyCalistaIsta:
             IstaConnectionError: If the connection fails.
             IstaApiError: For other API errors during login.
         """
-        _LOGGER.info("Attempting async login for %s", self.account)
+        _LOGGER.info("Attempting login for user: %s", self.account)
         try:
             # login method now returns bool, no need to check return value here
             # Exceptions will be raised on failure
             await self._virtual_api.login()
-            _LOGGER.info("Async login successful for %s", self.account)
+            _LOGGER.info("Login successful for user: %s", self.account)
             return True
-        except IstaLoginError as err:
-            _LOGGER.error("Async login failed for %s: %s", self.account, err)
+        except IstaLoginError:
+            _LOGGER.error("Login failed for user %s.", self.account)
             raise  # Re-raise specific login error
+        except IstaConnectionError as err:
+            _LOGGER.error(
+                "Login failed for user %s due to a connection error: %s",
+                self.account,
+                err,
+            )
+            raise
         except Exception as err:
             # Catch other potential errors from VirtualApi.login
             _LOGGER.exception(
-                "Unexpected error during async login for %s", self.account
+                "An unexpected error occurred during login for user %s.", self.account
             )
             # Wrap unexpected errors in a generic API error
             raise IstaApiError(
@@ -134,35 +169,38 @@ class PyCalistaIsta:
         start_date = start or (date.today() - timedelta(days=DEFAULT_HISTORY_DAYS))
         end_date = end or date.today()
 
-        _LOGGER.info(
-            "Requesting async device history for %s from %s to %s",
-            self.account,
-            start_date,
-            end_date,
-        )
-
         if start_date > end_date:
+            _LOGGER.error(
+                "Invalid date range provided. Start date (%s) cannot be after end date (%s).",
+                start_date,
+                end_date,
+            )
             raise ValueError("Start date must be before or equal to end date")
+        _LOGGER.info(
+            "Requesting device history for %s from %s to %s",
+            self.account,
+            start_date.isoformat(),
+            end_date.isoformat(),
+        )
 
         try:
             # Call the async method in VirtualApi
             devices = await self._virtual_api.get_devices_history(start_date, end_date)
             _LOGGER.info(
-                "Successfully retrieved history for %d devices for %s",
+                "Successfully retrieved and parsed history for %d device(s) for user %s.",
                 len(devices),
                 self.account,
             )
             return devices
-        except (ValueError, IstaLoginError, IstaApiError) as err:
+        except (ValueError, IstaLoginError, IstaApiError, IstaConnectionError) as err:
             # Catch known specific errors and re-raise
-            _LOGGER.error(
-                "Failed to get async device history for %s: %s", self.account, err
-            )
+            _LOGGER.error("Failed to get device history for %s: %s", self.account, err)
             raise
         except Exception as err:
             # Catch unexpected errors
             _LOGGER.exception(
-                "Unexpected error getting async device history for %s", self.account
+                "An unexpected error occurred while getting device history for %s.",
+                self.account,
             )
             raise IstaApiError(
                 f"An unexpected error occurred while fetching device history: {err}"

@@ -9,8 +9,12 @@ Constants:
     LOGIN_URL: URL for authentication endpoint
     DATA_URL: URL for data retrieval endpoint
     USER_AGENT: User agent string for HTTP requests
+    LOG_LEVEL_MAP: Mapping from string log levels to Python logging constants.
 """
 
+from __future__ import annotations
+
+import logging
 from typing import Final
 
 from .__version import __version__
@@ -29,3 +33,12 @@ USER_AGENT: Final[str] = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/101.0.4951.67 Safari/537.36"
 )
+
+# Logging
+LOG_LEVEL_MAP: Final[dict[str, int]] = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}

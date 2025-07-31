@@ -88,13 +88,6 @@ class Device:
         else:
             insort(self.history, reading, key=lambda x: x.date)
 
-        _LOGGER.debug(
-            "Reading %s added for device %s on %s",
-            reading,
-            self.serial_number,
-            reading.date,
-        )
-
     @property
     def last_consumption(self) -> Reading | None:
         """Calculate consumption between the last two readings.

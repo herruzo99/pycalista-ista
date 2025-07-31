@@ -1,6 +1,5 @@
 """Fixtures for PyCalistaIsta Tests (Async)."""
 
-import asyncio
 from pathlib import Path
 from urllib.parse import quote
 
@@ -22,17 +21,6 @@ TEST_WRONG_PASSWORD = "wrong_password"
 BASE_URL = "https://oficina.ista.es/GesCon/"
 
 # --- Fixtures ---
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for the session."""
-    # This overrides the default pytest-asyncio loop fixture if needed,
-    # usually not required unless customizing the loop policy.
-    policy = asyncio.get_event_loop_policy()
-    loop = policy.new_event_loop()
-    yield loop
-    loop.close()
 
 
 @pytest_asyncio.fixture  # Use async fixture decorator

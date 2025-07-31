@@ -60,7 +60,10 @@ async def test_login_connection_error(
         "https://oficina.ista.es/GesCon/GestionOficinaVirtual.do",
         exception=ClientConnectionError("Connection refused"),
     )
-    with pytest.raises(IstaConnectionError, match="Request failed: Connection refused"):
+    # The error message now reflects that retries were attempted.
+    with pytest.raises(
+        IstaConnectionError, match="Request failed after retries: Connection refused"
+    ):
         await ista_api_client.login()
 
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pycalista-ista"
-version = "0.5.3"
+version = "0.6.0"
 description = "Python library for the ista calista service"
 authors = [{name = "Juan Herruzo", email = "juan@herruzo.dev"}]
 license = {text = "MIT"}
@@ -61,6 +61,10 @@ addopts = "-ra -q --cov=pycalista_ista"
 testpaths = [
     "tests",
 ]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
 
 [tool.coverage.run]
 source = ["pycalista_ista"]
