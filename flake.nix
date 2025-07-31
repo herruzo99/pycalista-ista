@@ -46,6 +46,7 @@
             black
             isort
             xlwt
+
           ]);
         in
         pkgs.mkShell {

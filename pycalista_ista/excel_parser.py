@@ -40,7 +40,7 @@ DATE_HEADER_FORMAT: Final[str] = "%d/%m"  # Format expected in headers initially
 # Device type identifiers (normalized)
 COLD_WATER_TYPE_ID: Final[str] = "radio agua fria"
 HOT_WATER_TYPE_ID: Final[str] = "radio agua caliente"
-HEATING_TYPE_ID: Final[str] = "distribuidor de costes de calefaccion"  # Normalized
+HEATING_TYPE_ID: Final[str] = "distribuidor de costes de calefaccion"
 
 
 class ExcelParser:
@@ -77,9 +77,7 @@ class ExcelParser:
         except ValueError as err:
             raise IstaParserError(f"Invalid current_year for parser: {err}") from err
 
-        _LOGGER.debug(
-            "ExcelParser initialized with year context: %d", self.current_year
-        )
+        _LOGGER.debug("ExcelParser initialized for year context: %d", self.current_year)
 
     def _normalize_headers(self, raw_headers: list[str]) -> list[str]:
         """Normalize Excel column headers.
@@ -97,7 +95,7 @@ class ExcelParser:
         for header in raw_headers:
             if not isinstance(header, str):
                 _LOGGER.warning(
-                    "Skipping non-string header: %s (%s)", header, type(header)
+                    "Skipping non-string header of type %s: %s", type(header), header
                 )
                 normalized_headers.append(f"unknown_header_{len(normalized_headers)}")
                 continue
@@ -113,7 +111,6 @@ class ExcelParser:
             norm = unidecode(norm)
 
             normalized_headers.append(norm)
-        _LOGGER.debug("Normalized headers: %s", normalized_headers)
         return normalized_headers
 
     def _assign_years_to_date_headers(self, headers: list[str]) -> list[str]:
@@ -157,8 +154,11 @@ class ExcelParser:
                 ):
                     assigned_year -= 1
                     _LOGGER.debug(
-                        "Detected year rollover for header '%s'. Assigning year: %d",
+                        "Detected year rollover parsing headers. Header '%s' (month %d) follows "
+                        "header with month %d. Assigning new year: %d",
                         header,
+                        current_month,
+                        last_processed_month,
                         assigned_year,
                     )
 
@@ -170,9 +170,9 @@ class ExcelParser:
                 )
 
             except ValueError:
-                # Header doesn't match 'dd/mm' format, treat as non-date or raise error
                 _LOGGER.warning(
-                    "Header '%s' could not be parsed as a date (%s). Treating as non-date.",
+                    "Header '%s' could not be parsed as a date with format '%s'. "
+                    "This may indicate an unexpected Excel file structure.",
                     header,
                     DATE_HEADER_FORMAT,
                 )
@@ -184,9 +184,11 @@ class ExcelParser:
                 )
             except Exception as e:
                 # Catch other unexpected errors during date processing
+                _LOGGER.exception(
+                    "Unexpected error while processing header '%s'", header
+                )
                 raise IstaParserError(f"Error processing header '{header}': {e}") from e
 
-        _LOGGER.debug("Headers with assigned years: %s", processed_headers)
         return processed_headers
 
     def _read_and_prepare_dataframe(self) -> pd.DataFrame:
@@ -205,14 +207,15 @@ class ExcelParser:
             # Ensure file pointer is at the beginning
             self.io_file.seek(0)
             df = pd.read_excel(self.io_file, engine="xlrd")
-            _LOGGER.debug("Successfully read Excel")
+            _LOGGER.debug("Successfully read Excel file into DataFrame.")
 
         except Exception as err:
             # Catch errors during file reading (e.g., invalid format, permissions)
+            _LOGGER.error("Pandas failed to read Excel file content.", exc_info=True)
             raise IstaParserError(f"Failed to read Excel file: {err}") from err
 
         if df.empty:
-            _LOGGER.warning("Excel file is empty.")
+            _LOGGER.warning("Excel file is empty or contains no data.")
             # Return empty DataFrame, let caller handle it
             return df
 
@@ -226,12 +229,17 @@ class ExcelParser:
         # Assign years to date headers
         try:
             final_headers = self._assign_years_to_date_headers(normalized_headers)
-        except IstaParserError as err:
-            _LOGGER.error("Failed to assign years to date headers: %s", err)
+        except IstaParserError:
+            _LOGGER.error("Failed to assign years to date headers during parsing.")
             raise  # Re-raise the specific parser error
 
         # Check if number of headers matches original
         if len(final_headers) != len(raw_headers):
+            _LOGGER.error(
+                "Header processing resulted in mismatched column count. Original: %d, Processed: %d",
+                len(raw_headers),
+                len(final_headers),
+            )
             raise IstaParserError(
                 "Header processing resulted in mismatched column count."
             )
@@ -241,6 +249,11 @@ class ExcelParser:
         # --- Metadata Validation ---
         missing_metadata = EXPECTED_METADATA_COLUMNS - set(df.columns)
         if missing_metadata:
+            _LOGGER.error(
+                "DataFrame is missing required metadata columns. Missing: %s. Available: %s",
+                missing_metadata,
+                df.columns.to_list(),
+            )
             raise IstaParserError(
                 f"Missing required metadata columns: {missing_metadata}"
             )
@@ -248,7 +261,11 @@ class ExcelParser:
         # Fill NaN in metadata columns with empty strings for consistency
         metadata_cols_list = list(EXPECTED_METADATA_COLUMNS)
         df[metadata_cols_list] = df[metadata_cols_list].fillna("")
-
+        _LOGGER.debug(
+            "DataFrame prepared for processing with %d rows and columns: %s",
+            len(df),
+            df.columns.to_list(),
+        )
         return df
 
     def get_devices_history(self) -> DeviceDict:
@@ -263,15 +280,17 @@ class ExcelParser:
         Raises:
             IstaParserError: If any step of the parsing process fails.
         """
-        _LOGGER.info("Starting Excel parsing process.")
+        _LOGGER.info("Starting Excel parsing and data extraction.")
         try:
             df = self._read_and_prepare_dataframe()
-        except IstaParserError as err:
-            _LOGGER.error("Failed to read or prepare DataFrame: %s", err)
+        except IstaParserError:
+            _LOGGER.error(
+                "Failed to read and prepare DataFrame from Excel file.", exc_info=True
+            )
             raise  # Propagate error
 
         if df.empty:
-            _LOGGER.info("No data found in Excel file.")
+            _LOGGER.info("Parsing skipped as Excel file is empty.")
             return {}  # Return empty dict if DataFrame is empty
 
         devices: DeviceDict = {}
@@ -281,14 +300,14 @@ class ExcelParser:
         # Iterate through DataFrame rows as dictionaries
         for index, row_dict in df.iterrows():
             processed_rows += 1
+            _LOGGER.debug("Processing DataFrame row index: %d", index)
             try:
                 device = self._process_device_row(row_dict)
                 if device:
                     # Add or update device in the dictionary
                     if device.serial_number in devices:
-                        # Merge readings if device already exists (shouldn't happen with unique serials per file)
                         _LOGGER.warning(
-                            "Duplicate serial number found: %s. Merging readings.",
+                            "Duplicate serial number '%s' found in the same file. Merging readings.",
                             device.serial_number,
                         )
                         existing_device = devices[device.serial_number]
@@ -297,6 +316,12 @@ class ExcelParser:
                             if reading.date not in existing_dates:
                                 existing_device.add_reading(reading)
                     else:
+                        _LOGGER.debug(
+                            "New device created from row %d: SN=%s, Type=%s",
+                            index,
+                            device.serial_number,
+                            device.__class__.__name__,
+                        )
                         devices[device.serial_number] = device
                 else:
                     # Device creation failed (e.g., unknown type)
@@ -304,15 +329,16 @@ class ExcelParser:
 
             except (ValueError, TypeError, IstaParserError) as err:
                 _LOGGER.error(
-                    "Error processing row %d: %s. Data: %s",
+                    "Skipping row %d due to processing error: %s. Row data: %s",
                     index,
                     err,
                     row_dict,
-                    exc_info=True,
                 )
                 skipped_rows += 1
-            except Exception as err:
-                _LOGGER.exception("Unexpected error processing row %d: %s", index, err)
+            except Exception:
+                _LOGGER.exception(
+                    "Skipping row %d due to an unexpected exception.", index
+                )
                 skipped_rows += 1
 
         _LOGGER.info(
@@ -323,7 +349,8 @@ class ExcelParser:
         )
         if skipped_rows > 0:
             _LOGGER.warning(
-                "%d rows were skipped due to errors during processing.", skipped_rows
+                "%d row(s) were skipped due to errors. Check logs for details.",
+                skipped_rows,
             )
 
         return devices
@@ -349,6 +376,12 @@ class ExcelParser:
         # Normalize device type string for reliable matching
         device_type_str = str(row.get(NORMALIZED_TYPE_HEADER, "")).strip().lower()
         device_type_str = unidecode(device_type_str)  # Remove accents
+        _LOGGER.debug(
+            "Extracted metadata from row: SN='%s', Location='%s', Type='%s'",
+            serial_number,
+            location,
+            device_type_str,
+        )
 
         if not serial_number:
             raise ValueError("Missing or empty serial number in row.")
@@ -360,7 +393,7 @@ class ExcelParser:
         if not device:
             # Log warning but allow skipping this row if type is unknown
             _LOGGER.warning(
-                "Unknown device type '%s' for serial %s. Skipping row.",
+                "Unknown device type string '%s' for serial '%s'. Skipping row.",
                 row.get(NORMALIZED_TYPE_HEADER),
                 serial_number,
             )
@@ -421,6 +454,11 @@ class ExcelParser:
         """
         added_count = 0
         skipped_count = 0
+        _LOGGER.debug(
+            "Adding %d potential readings for device %s.",
+            len(readings_dict),
+            device.serial_number,
+        )
         for date_str, reading_val in readings_dict.items():
             try:
                 # Parse date string (should already include year)
@@ -437,11 +475,6 @@ class ExcelParser:
                     reading_str = str(reading_val).replace(",", ".")
                     try:
                         reading_value_float = float(reading_str)
-                        # Optional: Check for negative values if they are invalid
-                        # if reading_value_float < 0:
-                        #     _LOGGER.warning("Negative reading value found for %s on %s: %s. Storing as None.",
-                        #                     device.serial_number, date_str, reading_value_float)
-                        #     reading_value_float = None # Treat negative as missing/invalid
                     except ValueError:
                         _LOGGER.warning(
                             "Invalid reading value format for %s on %s: '%s'. Storing as None.",
@@ -452,14 +485,12 @@ class ExcelParser:
                         reading_value_float = None  # Treat unparseable as missing
 
                 # Add the reading (value can be None)
-                # The Device model handles sorting and potential negative value errors internally if needed
                 device.add_reading_value(reading_value_float, reading_date)
                 added_count += 1
 
             except ValueError as err:
-                # Catch errors from strptime or float conversion specifically
                 _LOGGER.error(
-                    "Error parsing reading for %s - Date: '%s', Value: '%s'. Error: %s",
+                    "Skipping reading for SN %s due to parsing error. Date: '%s', Value: '%s'. Error: %s",
                     device.serial_number,
                     date_str,
                     reading_val,
@@ -467,9 +498,8 @@ class ExcelParser:
                 )
                 skipped_count += 1
             except Exception:
-                # Catch unexpected errors during parsing of a single reading
                 _LOGGER.exception(
-                    "Unexpected error adding reading for %s - Date: '%s', Value: '%s'",
+                    "Skipping reading for SN %s due to an unexpected error. Date: '%s', Value: '%s'",
                     device.serial_number,
                     date_str,
                     reading_val,
@@ -477,7 +507,7 @@ class ExcelParser:
                 skipped_count += 1
 
         _LOGGER.debug(
-            "Added %d readings, skipped %d readings for device %s",
+            "Finished processing readings for device %s. Added: %d, Skipped: %s.",
             added_count,
             skipped_count,
             device.serial_number,

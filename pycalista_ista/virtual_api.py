@@ -33,8 +33,8 @@ _LOGGER = logging.getLogger(__name__)
 DeviceDict = TypeVar("DeviceDict", bound=dict[str, Device])
 
 # Constants
-MAX_RETRIES: Final = 0
-RETRY_BACKOFF: Final = 1
+MAX_RETRIES: Final = 2
+RETRY_BACKOFF: Final = 2
 RETRY_STATUS_CODES: Final = {408, 429, 502, 503, 504}
 MAX_DAYS_PER_REQUEST: Final = 240
 EXCEL_CONTENT_TYPE: Final = "application/vnd.ms-excel;charset=iso-8859-1"
@@ -105,33 +105,42 @@ class VirtualApi:
             IstaConnectionError: If the request fails after retries.
             IstaLoginError: If a request fails due to expired session after relogin attempt.
         """
-        _LOGGER.debug("Sending %s request to %s, kwargs: %s", method, url, kwargs)
+        _LOGGER.debug(
+            "Sending request: Method=%s, URL=%s, Retries left=%d, Params/Data=%s",
+            method,
+            url,
+            retry_attempts,
+            kwargs.get("params") or kwargs.get("data"),
+        )
 
         if self.session is None or self.session.closed:
+            _LOGGER.error("Cannot send request, session is closed.")
             raise IstaConnectionError("Session is closed")
 
         try:
             response = await self.session.request(method, url, **kwargs)
-            text = await response.text()
+            response_text_snippet = (await response.text())[:250].replace("\n", "")
             _LOGGER.debug(
-                "Received response %s from %s: %s",
+                "Received response: Status=%s, Content-Type=%s, URL=%s, Snippet=%s",
                 response.status,
-                url,
-                text[:200],  # Log beginning of response text
+                response.headers.get("Content-Type"),
+                response.url,
+                response_text_snippet,
             )
 
             # Check for potential session expiry/redirect to login page
             # This check might need adjustment based on actual redirect behavior
             if response.status == 200:
-                # Heuristic: If we get HTML back on an API call, it might be login page
+                # Heuristic: If we get HTML back on an API call, it might be the login page
                 response_text = await response.text()
                 if (
                     "GestionOficinaVirtual.do" in response_text
                     and 'type="password"' in response_text
                     and relogin
                 ):  # Check if it looks like the login page
-                    _LOGGER.warning(
-                        "Detected potential session expiry, attempting relogin"
+                    _LOGGER.info(
+                        "Request to %s returned a login page. Session may have expired. Attempting relogin.",
+                        url,
                     )
                     if await self.relogin():  # Attempt relogin
                         # Retry the original request *once* after successful relogin
@@ -139,9 +148,13 @@ class VirtualApi:
                             "Relogin successful, retrying original request to %s", url
                         )
                         response = await self.session.request(method, url, **kwargs)
-                        _LOGGER.debug("Retry response status: %s", response.status)
+                        _LOGGER.debug(
+                            "Retry request after relogin returned status: %s",
+                            response.status,
+                        )
                     else:
                         # Relogin failed, raise specific error
+                        _LOGGER.error("Relogin failed. Unable to complete request.")
                         raise IstaLoginError("Relogin failed, cannot complete request.")
 
             # Raise exception for non-success status codes after potential relogin
@@ -152,57 +165,46 @@ class VirtualApi:
             if err.status in RETRY_STATUS_CODES and retry_attempts > 0:
                 wait_time = RETRY_BACKOFF * (MAX_RETRIES - retry_attempts + 1)
                 _LOGGER.warning(
-                    "Request failed with status %s, retrying in %ds (%d attempts left)",
+                    "Request failed with recoverable status %s, retrying in %ds... (%d attempts left)",
                     err.status,
                     wait_time,
-                    retry_attempts - 1,
+                    retry_attempts,
                 )
                 await asyncio.sleep(wait_time)
                 # Decrement retry counter for the recursive call
                 return await self._send_request(
-                    method, url, retry_attempts - 1, **kwargs
+                    method, url, retry_attempts - 1, relogin=relogin, **kwargs
                 )
             _LOGGER.error(
-                "Request failed with status %s after retries or for unrecoverable status: %s",
+                "Request failed with unrecoverable status %s for URL %s: %s",
                 err.status,
+                url,
                 err.message,
             )
             raise IstaConnectionError(
                 f"Request failed: {err.status} {err.message}"
             ) from err
-        except ClientError as err:
-            # Handle other client errors (e.g., connection refused, timeout)
+        except (ClientError, asyncio.TimeoutError) as err:
             if retry_attempts > 0:
                 wait_time = RETRY_BACKOFF * (MAX_RETRIES - retry_attempts + 1)
                 _LOGGER.warning(
-                    "Request failed with client error %s, retrying in %ds (%d attempts left)",
-                    err.__class__.__name__,
+                    "Request failed with %s, retrying in %ds... (%d attempts left)",
+                    type(err).__name__,
                     wait_time,
-                    retry_attempts - 1,
+                    retry_attempts,
                 )
                 await asyncio.sleep(wait_time)
-                # Decrement retry counter for the recursive call
                 return await self._send_request(
-                    method, url, retry_attempts - 1, **kwargs
+                    method, url, retry_attempts - 1, relogin=relogin, **kwargs
                 )
-            _LOGGER.error("Request failed with client error after retries: %s", err)
-            raise IstaConnectionError(f"Request failed: {err}") from err
-        except asyncio.TimeoutError as err:
-            # Handle timeout errors specifically
-            if retry_attempts > 0:
-                wait_time = RETRY_BACKOFF * (MAX_RETRIES - retry_attempts + 1)
-                _LOGGER.warning(
-                    "Request timed out, retrying in %ds (%d attempts left)",
-                    wait_time,
-                    retry_attempts - 1,
-                )
-                await asyncio.sleep(wait_time)
-                # Decrement retry counter for the recursive call
-                return await self._send_request(
-                    method, url, retry_attempts - 1, **kwargs
-                )
-            _LOGGER.error("Request timed out after retries")
-            raise IstaConnectionError("Request timed out") from err
+
+            _LOGGER.error(
+                "Request to %s failed after all retries due to %s: %s",
+                url,
+                type(err).__name__,
+                err,
+            )
+            raise IstaConnectionError(f"Request failed after retries: {err}") from err
 
     async def relogin(self) -> bool:
         """Perform a fresh login, clearing old session state if necessary.
@@ -235,7 +237,7 @@ class VirtualApi:
             #     # Optionally verify session validity here if possible
             #     return True
 
-            _LOGGER.info("Attempting login for user %s", self.username)
+            _LOGGER.info("Attempting to log in user: %s", self.username)
             data = {
                 "metodo": "loginAbonado",
                 "loginName": self.username,
@@ -247,27 +249,36 @@ class VirtualApi:
                     "POST", LOGIN_URL, data=data, relogin=False
                 )
 
-                # Check for indicators of login failure. Ista returns 200 OK but with
-                # content length > 0 on failure, unlike success which has no body.
-                # Check content length or analyze response content if necessary.
                 content_length = response.headers.get("Content-Length")
                 if content_length is not None and int(content_length) > 0:
+                    response_text = await response.text()
                     _LOGGER.warning(
-                        "Login failed for %s (Content-Length > 0)", self.username
+                        "Login failed for %s. Server returned status 200 but with content (length: %s), "
+                        "which indicates invalid credentials. Response snippet: %s",
+                        self.username,
+                        content_length,
+                        response_text[:250].replace("\n", ""),
                     )
                     raise IstaLoginError(
                         "Login failed - invalid credentials or server error"
                     )
 
-                _LOGGER.info("Login successful for %s", self.username)
+                _LOGGER.info("Login successful for %s.", self.username)
                 # Preload metadata needed for data downloads
                 await self._preload_reading_metadata()
                 return True
 
-            except (ClientError, asyncio.TimeoutError) as err:
-                _LOGGER.error("Login request failed for %s: %s", self.username, err)
-                raise IstaConnectionError(f"Login request failed: {err}") from err
+            except IstaConnectionError as err:
+                _LOGGER.error(
+                    "Connection error during login for %s: %s", self.username, err
+                )
+                raise
             except IstaLoginError:  # Re-raise specific login errors
+                raise
+            except Exception:
+                _LOGGER.exception(
+                    "An unexpected error occurred during login for %s", self.username
+                )
                 raise
 
     async def _preload_reading_metadata(self) -> None:
@@ -277,14 +288,17 @@ class VirtualApi:
             IstaConnectionError: If the request fails.
             IstaLoginError: If session expired and relogin failed.
         """
-        _LOGGER.debug("Preloading reading metadata")
+        _LOGGER.debug("Preloading reading metadata for Excel export.")
         params = {"metodo": "preCargaLecturasRadio"}
         try:
             await self._send_request("GET", DATA_URL, params=params)
-            _LOGGER.debug("Metadata preloaded successfully")
-        except (ClientError, asyncio.TimeoutError, IstaConnectionError) as err:
-            _LOGGER.error("Failed to preload metadata: %s", err)
-            # Let the specific exception type bubble up
+            _LOGGER.debug("Successfully preloaded reading metadata.")
+        except (IstaConnectionError, IstaLoginError) as err:
+            _LOGGER.error("Failed to preload reading metadata: %s", err)
+            raise
+        except Exception:
+            _LOGGER.exception("An unexpected error occurred while preloading metadata.")
+            raise
 
     async def _get_readings_chunk(
         self,
@@ -309,14 +323,24 @@ class VirtualApi:
             IstaApiError: For unexpected errors.
         """
         delta_days = (end - start).days
-        if delta_days > max_days:
+        if delta_days >= max_days:  # Use >= to be safe
+            _LOGGER.error(
+                "Date range (%d days) exceeds maximum of %d days.",
+                delta_days,
+                max_days,
+            )
             raise ValueError(
                 f"Date range exceeds maximum {max_days} days: {delta_days} days"
             )
         if delta_days < 0:
+            _LOGGER.error("Start date (%s) is after end date (%s).", start, end)
             raise ValueError("Start date must be before end date")
 
-        _LOGGER.debug("Fetching readings chunk from %s to %s", start, end)
+        _LOGGER.debug(
+            "Fetching readings chunk for date range: %s to %s",
+            start.isoformat(),
+            end.isoformat(),
+        )
 
         params = {
             "d-4360165-e": "2",  # 2=xlsx format
@@ -331,43 +355,45 @@ class VirtualApi:
 
             content_type = response.headers.get("Content-Type", "")
             if EXCEL_CONTENT_TYPE not in content_type:
-                # Check if it's an HTML response indicating potential session expiry
-                if "text/html" in content_type:
-                    # This was already handled inside _send_request with a relogin attempt.
-                    # If we reach here, the relogin likely failed or the page isn't the login page.
-                    _LOGGER.error(
-                        "Received unexpected HTML content instead of Excel after potential relogin attempt. Content: %s",
-                        (await response.text())[
-                            :500
-                        ],  # Log beginning of unexpected content
-                    )
-                    raise IstaApiError(
-                        f"Received unexpected HTML content instead of Excel for {start} to {end}."
-                    )
-
-                # Handle other unexpected content types
+                # This case is now more likely to be handled by the relogin logic
+                # in _send_request, but we keep a specific check as a safeguard.
+                response_text = await response.text()
                 _LOGGER.error(
-                    "Unexpected content type received: %s. Expected '%s'.",
+                    "Expected Excel file but received content type '%s'. This may indicate a session or API issue. Response snippet: %s",
                     content_type,
-                    EXCEL_CONTENT_TYPE,
+                    response_text[:250].replace("\n", ""),
                 )
-                raise IstaApiError(f"Unexpected content type: {content_type}")
+                if (
+                    "text/html" in content_type
+                    and "GestionOficinaVirtual.do" in response_text
+                ):
+                    raise IstaLoginError(
+                        "Received login page instead of Excel file, session likely expired and relogin failed."
+                    )
+                raise IstaApiError(
+                    f"Received unexpected content type '{content_type}' instead of Excel file."
+                )
 
             # Read response content into BytesIO
             content = await response.read()
+            _LOGGER.debug(
+                "Successfully downloaded Excel data chunk of size %d bytes.",
+                len(content),
+            )
             return io.BytesIO(content)
 
-        except (
-            ClientError,
-            asyncio.TimeoutError,
-            IstaConnectionError,
-            IstaLoginError,
-            IstaApiError,
-        ) as err:
+        except (IstaConnectionError, IstaLoginError, IstaApiError) as err:
             _LOGGER.error(
-                "Failed to get readings chunk from %s to %s: %s", start, end, err
+                "Failed to download readings chunk from %s to %s: %s", start, end, err
             )
             raise  # Re-raise the caught exception
+        except Exception:
+            _LOGGER.exception(
+                "An unexpected error occurred while downloading readings chunk from %s to %s",
+                start,
+                end,
+            )
+            raise
 
     async def _get_readings(
         self,
@@ -397,20 +423,25 @@ class VirtualApi:
         file_buffers: list[tuple[int, io.BytesIO]] = []
         current_start = start
 
-        while current_start <= end:
-            # Calculate end date for the current chunk
-            # Ensure we don't exceed the overall end date
-            current_end = min(
-                current_start + timedelta(days=max_days - 1), end
-            )  # -1 because timedelta includes start day
+        _LOGGER.debug(
+            "Starting to fetch all readings from %s to %s in chunks of max %d days.",
+            start.isoformat(),
+            end.isoformat(),
+            max_days,
+        )
 
-            _LOGGER.info("Requesting data chunk: %s to %s", current_start, current_end)
+        while current_start <= end:
+            current_end = min(current_start + timedelta(days=max_days - 1), end)
+
+            _LOGGER.info(
+                "Requesting data chunk for period: %s to %s",
+                current_start.isoformat(),
+                current_end.isoformat(),
+            )
 
             try:
                 # Fetch the chunk asynchronously
-                file_buffer = await self._get_readings_chunk(
-                    current_start, current_end, max_days
-                )
+                file_buffer = await self._get_readings_chunk(current_start, current_end)
                 # Store the buffer along with the *end* year for the parser context
                 file_buffers.append((current_end.year, file_buffer))
             except (
@@ -420,9 +451,9 @@ class VirtualApi:
                 ValueError,
             ) as err:
                 _LOGGER.error(
-                    "Failed to get readings for chunk %s to %s: %s",
-                    current_start,
-                    current_end,
+                    "Aborting history fetch. Failed to get readings for chunk %s to %s: %s",
+                    current_start.isoformat(),
+                    current_end.isoformat(),
                     err,
                 )
                 raise  # Propagate the error to stop the process
@@ -430,7 +461,7 @@ class VirtualApi:
             # Move to the next day after the current chunk's end date
             current_start = current_end + timedelta(days=1)
 
-        _LOGGER.info("Successfully retrieved %d data chunks.", len(file_buffers))
+        _LOGGER.info("Successfully retrieved %d data chunk(s).", len(file_buffers))
         return file_buffers
 
     async def get_devices_history(
@@ -454,7 +485,11 @@ class VirtualApi:
             IstaParserError: If Excel parsing fails.
             IstaApiError: For unexpected errors.
         """
-        _LOGGER.info("Getting device history from %s to %s", start, end)
+        _LOGGER.info(
+            "Getting full device history from %s to %s",
+            start.isoformat(),
+            end.isoformat(),
+        )
         if start > end:
             raise ValueError("Start date must be before end date")
 
@@ -464,9 +499,9 @@ class VirtualApi:
 
             if not current_year_file_buffers:
                 _LOGGER.warning(
-                    "No data files retrieved from Ista for the period %s to %s",
-                    start,
-                    end,
+                    "No data files were retrieved from Ista for the period %s to %s. This can be normal if there are no new readings.",
+                    start.isoformat(),
+                    end.isoformat(),
                 )
                 return {}  # Return empty dict if no files were fetched
 
@@ -474,6 +509,10 @@ class VirtualApi:
             loop = asyncio.get_running_loop()
 
             # Process parsing in executor as pandas/xlrd are synchronous
+            _LOGGER.debug(
+                "Creating %d parsing tasks to run in executor.",
+                len(current_year_file_buffers),
+            )
             tasks = []
             for current_year, file_buffer in current_year_file_buffers:
                 parser = ExcelParser(file_buffer, current_year)
@@ -484,9 +523,13 @@ class VirtualApi:
             parsed_results = await asyncio.gather(*tasks, return_exceptions=True)
 
             # Check for parsing errors
-            for result in parsed_results:
+            for i, result in enumerate(parsed_results):
                 if isinstance(result, Exception):
-                    _LOGGER.error("Error during Excel parsing: %s", result)
+                    _LOGGER.error(
+                        "An error occurred during the parsing of an Excel file (chunk %d).",
+                        i + 1,
+                        exc_info=result,
+                    )
                     # Raise the first encountered parser error
                     raise IstaParserError(
                         "Failed to parse one or more Excel files"
@@ -494,16 +537,21 @@ class VirtualApi:
                 if isinstance(result, dict):
                     device_lists.append(result)
                 else:
-                    # Should not happen if gather returns correctly
                     _LOGGER.error(
-                        "Unexpected result type from parser task: %s", type(result)
+                        "Unexpected result of type '%s' returned from parser task.",
+                        type(result),
                     )
                     raise IstaParserError("Unexpected result during parsing.")
 
+            _LOGGER.debug(
+                "All %d parsing tasks completed. Proceeding to merge results.",
+                len(parsed_results),
+            )
             # Merge the results from different files/chunks
             merged_devices = self.merge_device_histories(device_lists)
             _LOGGER.info(
-                "Successfully merged history for %d devices", len(merged_devices)
+                "Successfully merged history, resulting in %d unique devices.",
+                len(merged_devices),
             )
             return merged_devices
 
@@ -514,8 +562,13 @@ class VirtualApi:
             IstaApiError,
             ValueError,
         ) as err:
-            _LOGGER.error("Failed to get complete device history: %s", err)
+            _LOGGER.error(
+                "Failed to get complete device history: %s", err, exc_info=True
+            )
             raise  # Re-raise the specific error
+        except Exception:
+            _LOGGER.exception("An unexpected error occurred in get_devices_history.")
+            raise
 
     def merge_device_histories(self, device_lists: list[DeviceDict]) -> DeviceDict:
         """Merge device histories from multiple time periods.
@@ -531,16 +584,26 @@ class VirtualApi:
             Dictionary with merged and interpolated device histories.
         """
         merged_devices: DeviceDict = {}
-        _LOGGER.debug("Merging %d device lists", len(device_lists))
+        _LOGGER.debug("Merging %d list(s) of parsed devices.", len(device_lists))
 
-        for device_list in device_lists:
+        for i, device_list in enumerate(device_lists):
+            _LOGGER.debug(
+                "Processing device list #%d with %d devices.", i + 1, len(device_list)
+            )
             for serial_number, device in device_list.items():
                 if not isinstance(device, Device):
-                    _LOGGER.warning("Skipping invalid item in device list: %s", device)
+                    _LOGGER.warning(
+                        "Skipping invalid item in device list (not a Device object): %s",
+                        device,
+                    )
                     continue
 
                 if serial_number not in merged_devices:
                     # Create a new instance of the correct device type
+                    _LOGGER.debug(
+                        "Discovered new device SN %s. Creating entry in merged list.",
+                        serial_number,
+                    )
                     merged_devices[serial_number] = device.__class__(
                         serial_number=device.serial_number, location=device.location
                     )
@@ -548,12 +611,24 @@ class VirtualApi:
                 existing_device = merged_devices[serial_number]
                 # Add readings, ensuring no duplicates based on date
                 existing_dates = {r.date for r in existing_device.history}
+                new_readings_count = 0
                 for reading in device.history:
                     if reading.date not in existing_dates:
                         existing_device.add_reading(reading)
                         existing_dates.add(reading.date)
+                        new_readings_count += 1
+                if new_readings_count > 0:
+                    _LOGGER.debug(
+                        "Added %d new unique readings to device SN %s.",
+                        new_readings_count,
+                        serial_number,
+                    )
 
         # Interpolate and trim final merged devices
+        _LOGGER.debug(
+            "Finished merging. Now interpolating and trimming %d devices.",
+            len(merged_devices),
+        )
         final_devices: DeviceDict = {}
         for serial_number, device in merged_devices.items():
             try:
@@ -562,16 +637,15 @@ class VirtualApi:
                 )
             except Exception as e:
                 _LOGGER.error(
-                    "Error interpolating device %s: %s", serial_number, e, exc_info=True
-                )
-                # Optionally, decide whether to include the non-interpolated device or skip it
-                # For now, we'll skip it to avoid potentially corrupted data
-                _LOGGER.warning(
-                    "Skipping device %s due to interpolation error.", serial_number
+                    "Failed to interpolate readings for device %s. It will be excluded from the final results. Error: %s",
+                    serial_number,
+                    e,
+                    exc_info=True,
                 )
 
         _LOGGER.debug(
-            "Finished merging histories into %d final devices", len(final_devices)
+            "Finished merging and interpolation, resulting in %d final devices.",
+            len(final_devices),
         )
         return final_devices
 
@@ -589,7 +663,8 @@ class VirtualApi:
             ValueError: If device type is unknown or interpolation fails.
         """
         _LOGGER.debug(
-            "Interpolating and trimming readings for device %s", device.serial_number
+            "Interpolating and trimming readings for device SN %s.",
+            device.serial_number,
         )
         try:
             fixed_device = device.__class__(device.serial_number, device.location)
@@ -605,8 +680,9 @@ class VirtualApi:
 
         if len(valid_readings) < 2:
             _LOGGER.debug(
-                "Less than 2 valid readings for %s, skipping interpolation.",
+                "Device SN %s has fewer than 2 valid readings (%d). Skipping interpolation.",
                 device.serial_number,
+                len(valid_readings),
             )
             for reading in valid_readings:
                 fixed_device.add_reading(reading)
@@ -638,15 +714,24 @@ class VirtualApi:
             ]
 
             if to_interpolate:
+                _LOGGER.debug(
+                    "Found %d readings to interpolate for SN %s between %s and %s.",
+                    len(to_interpolate),
+                    device.serial_number,
+                    start_reading.date.isoformat(),
+                    end_reading.date.isoformat(),
+                )
                 start_val = start_reading.reading
                 end_val = end_reading.reading
 
                 if end_val < start_val:
                     _LOGGER.info(
-                        "Detected a reset for device %s (from %s to %s). Interpolating missing values as 0.",
+                        "Detected a meter reset for device SN %s (from %.2f to %.2f). "
+                        "Interpolating %d missing values as 0.",
                         device.serial_number,
                         start_val,
                         end_val,
+                        len(to_interpolate),
                     )
                     for r in sorted(to_interpolate, key=lambda x: x.date):
                         fixed_device.add_reading_value(0, r.date)
@@ -661,7 +746,7 @@ class VirtualApi:
 
                 if time_span == 0:
                     _LOGGER.warning(
-                        "Skipping interpolation for %s between identical timestamps: %s",
+                        "Cannot interpolate for SN %s, found identical timestamps for different readings: %s",
                         device.serial_number,
                         start_reading.date,
                     )
@@ -671,12 +756,8 @@ class VirtualApi:
                     elapsed_time = r.date.timestamp() - start_date_ts
                     fraction = elapsed_time / time_span
 
-                    # Calculate with higher precision to avoid rounding errors
-                    # e.g., 106.554 + 0 should not become 106.55
                     interpolated_value = round(start_val + (value_span * fraction), 4)
 
-                    # Rule 2: Enforce boundary to prevent float errors
-                    # This ensures value is not < start_val or > end_val
                     final_value = max(start_val, min(end_val, interpolated_value))
 
                     fixed_device.add_reading_value(final_value, r.date)
@@ -689,8 +770,9 @@ class VirtualApi:
             fixed_device.add_reading(valid_readings[-1])
 
         _LOGGER.debug(
-            "Interpolated %d readings for device %s",
-            interpolated_count,
+            "Interpolation complete for device SN %s. Total interpolated points: %d. Final reading count: %d",
             device.serial_number,
+            interpolated_count,
+            len(fixed_device.history),
         )
         return fixed_device
