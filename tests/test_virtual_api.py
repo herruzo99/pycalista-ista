@@ -7,6 +7,7 @@ import pytest
 from aiohttp import ClientConnectionError
 from aioresponses import aioresponses
 
+from pycalista_ista.const import LOGOUT_URL
 from pycalista_ista.exception_classes import (
     IstaConnectionError,
     IstaLoginError,
@@ -45,9 +46,16 @@ async def test_login_success(ista_api_client: VirtualApi, mock_responses: aiores
 
 
 async def test_login_failure(ista_api_client: VirtualApi, mock_responses: aioresponses):
-    """Test async login failure (invalid credentials)."""
-    mock_login_failure(mock_responses)
-    with pytest.raises(IstaLoginError, match="Login failed - invalid credentials"):
+    """Test async login failure (invalid credentials - 302 Redirect)."""
+    # Mock 302 redirect which now indicates failure
+    mock_responses.post(
+        "https://oficina.ista.es/GesCon/GestionOficinaVirtual.do",
+        status=302,
+        headers={"Location": "some_redirect_url"},
+    )
+    with pytest.raises(
+        IstaLoginError, match="Login failed - invalid credentials \(302 Redirect\)"
+    ):
         await ista_api_client.login()
 
 
@@ -78,6 +86,14 @@ async def test_relogin(ista_api_client: VirtualApi, mock_responses: aioresponses
     result = await ista_api_client.relogin()
     assert result is True
     # Verify login sequence was called
+
+
+async def test_logout(ista_api_client: VirtualApi, mock_responses: aioresponses):
+    """Test logout functionality."""
+    mock_responses.get(LOGOUT_URL, status=200)
+    await ista_api_client.logout()
+    # No assertion needed, just ensure no exception raised and request made
+    # We can verify the request was made if we want, but aioresponses mocks it so it must match URL
 
 
 @pytest.mark.parametrize(
@@ -157,6 +173,9 @@ async def test_get_devices_history_success(
 
     mock_get_readings(mock_responses, excel_file_content, start_str, end_str)
 
+    # Mock logout call which is now in finally block
+    mock_responses.get(LOGOUT_URL, status=200)
+
     # Patch the parser call within the async function context if needed,
     # but better to test parser separately. Assume parser works for this test.
     # We mock the http call, the parser runs in executor.
@@ -180,6 +199,9 @@ async def test_get_devices_history_parser_error(
     # Provide invalid excel content
     invalid_excel_content = b"this is not excel"
     mock_get_readings(mock_responses, invalid_excel_content, start_str, end_str)
+
+    # Mock logout call which is now in finally block
+    mock_responses.get(LOGOUT_URL, status=200)
 
     # The error comes from the parser running in the executor
     with pytest.raises(
