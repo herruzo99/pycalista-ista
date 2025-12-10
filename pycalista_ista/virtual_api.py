@@ -18,7 +18,7 @@ import aiohttp
 from aiohttp import ClientError, ClientResponseError, ClientSession
 from yarl import URL
 
-from .const import DATA_URL, LOGIN_URL, USER_AGENT
+from .const import DATA_URL, LOGIN_URL, LOGOUT_URL, USER_AGENT
 from .excel_parser import ExcelParser
 from .exception_classes import (
     IstaApiError,
@@ -119,7 +119,11 @@ class VirtualApi:
 
         try:
             response = await self.session.request(method, url, **kwargs)
-            response_text_snippet = (await response.text())[:250].replace("\n", "")
+            try:
+                response_text_snippet = (await response.text())[:250].replace("\n", "")
+            except UnicodeDecodeError:
+                response_text_snippet = "<binary content>"
+
             _LOGGER.debug(
                 "Received response: Status=%s, Content-Type=%s, URL=%s, Snippet=%s",
                 response.status,
@@ -132,7 +136,14 @@ class VirtualApi:
             # This check might need adjustment based on actual redirect behavior
             if response.status == 200:
                 # Heuristic: If we get HTML back on an API call, it might be the login page
-                response_text = await response.text()
+                try:
+                    response_text = await response.text()
+                except UnicodeDecodeError:
+                    _LOGGER.debug(
+                        "Response content is binary, skipping session expiry check."
+                    )
+                    response_text = ""
+
                 if (
                     "GestionOficinaVirtual.do" in response_text
                     and 'type="password"' in response_text
@@ -246,26 +257,30 @@ class VirtualApi:
 
             try:
                 response = await self._send_request(
-                    "POST", LOGIN_URL, data=data, relogin=False
+                    "POST", LOGIN_URL, data=data, relogin=False, allow_redirects=False
                 )
 
-                content_length = response.headers.get("Content-Length")
-                if content_length is not None and int(content_length) > 0:
-                    response_text = await response.text()
-                    _LOGGER.warning(
-                        "Login failed for %s. Server returned status 200 but with content (length: %s), "
-                        "which indicates invalid credentials. Response snippet: %s",
+                if response.status == 302:
+                    _LOGGER.error(
+                        "Login failed for %s. Server returned 302 Redirect.",
                         self.username,
-                        content_length,
-                        response_text[:250].replace("\n", ""),
                     )
                     raise IstaLoginError(
-                        "Login failed - invalid credentials or server error"
+                        "Login failed - invalid credentials (302 Redirect)"
                     )
 
-                _LOGGER.info("Login successful for %s.", self.username)
-                # Preload metadata needed for data downloads
-                await self._preload_reading_metadata()
+                if response.status == 200:
+                    _LOGGER.info("Login successful for %s (Status 200).", self.username)
+                    # Preload metadata needed for data downloads
+                    await self._preload_reading_metadata()
+                    return True
+
+                # Handle other unexpected statuses if necessary, though raise_for_status in _send_request might catch them
+                # But _send_request returns response even for non-200 if we don't raise there.
+                # Actually _send_request calls raise_for_status() at the end.
+                # So if we are here, status is 2xx.
+                # If it's not 200 (and not 302 which we handled), we might want to log it.
+
                 return True
 
             except IstaConnectionError as err:
@@ -280,6 +295,18 @@ class VirtualApi:
                     "An unexpected error occurred during login for %s", self.username
                 )
                 raise
+
+    async def logout(self) -> None:
+        """Log out from the Ista Calista virtual office asynchronously."""
+        _LOGGER.info("Logging out user: %s", self.username)
+        try:
+            # We expect a redirect to login page or similar, so we disable auto-relogin
+            # to prevent an infinite loop or unnecessary login after logout.
+            await self._send_request("GET", LOGOUT_URL, relogin=False)
+            _LOGGER.info("Logout successful for %s.", self.username)
+        except Exception as err:
+            _LOGGER.warning("Logout failed for %s: %s", self.username, err)
+            # We don't raise here as logout failure shouldn't block the main process result
 
     async def _preload_reading_metadata(self) -> None:
         """Preload reading metadata required for subsequent requests (async).
@@ -354,10 +381,39 @@ class VirtualApi:
             response = await self._send_request("GET", DATA_URL, params=params)
 
             content_type = response.headers.get("Content-Type", "")
-            if EXCEL_CONTENT_TYPE not in content_type:
+            # Check if content type indicates Excel (ignoring charset details)
+            if "application/vnd.ms-excel" not in content_type.lower():
                 # This case is now more likely to be handled by the relogin logic
                 # in _send_request, but we keep a specific check as a safeguard.
-                response_text = await response.text()
+                try:
+                    response_text = await response.text()
+                except UnicodeDecodeError:
+                    # If we can't decode it, it's likely binary (maybe the Excel file itself?)
+                    # even if the content-type header was wrong.
+                    # Let's log a snippet of the binary data for debugging.
+                    content_bytes = await response.read()
+                    _LOGGER.error(
+                        "Expected Excel file but received content type '%s'. "
+                        "Could not decode response text (UnicodeDecodeError). "
+                        "First 100 bytes of response: %s",
+                        content_type,
+                        content_bytes[:100],
+                    )
+                    # Check for ZIP (xlsx) or OLE2 (xls) magic numbers
+                    # PK.. = Zip/XLSX
+                    # D0CF11E0 = OLE2/XLS
+                    if content_bytes.startswith(b"PK") or content_bytes.startswith(
+                        b"\xd0\xcf\x11\xe0"
+                    ):
+                        _LOGGER.warning(
+                            "Response has valid Excel signature (PK or OLE2), assuming it is the Excel file despite Content-Type mismatch."
+                        )
+                        return io.BytesIO(content_bytes)
+
+                    raise IstaApiError(
+                        f"Received unexpected content type '{content_type}' and could not decode response."
+                    )
+
                 _LOGGER.error(
                     "Expected Excel file but received content type '%s'. This may indicate a session or API issue. Response snippet: %s",
                     content_type,
@@ -569,6 +625,8 @@ class VirtualApi:
         except Exception:
             _LOGGER.exception("An unexpected error occurred in get_devices_history.")
             raise
+        finally:
+            await self.logout()
 
     def merge_device_histories(self, device_lists: list[DeviceDict]) -> DeviceDict:
         """Merge device histories from multiple time periods.

@@ -26,6 +26,7 @@ VERSION: Final[str] = __version__
 BASE_URL: Final[str] = "https://oficina.ista.es/GesCon/"
 LOGIN_URL: Final[str] = BASE_URL + "GestionOficinaVirtual.do"
 DATA_URL: Final[str] = BASE_URL + "GestionFincas.do"
+LOGOUT_URL: Final[str] = BASE_URL + "GestionOficinaVirtual.do?metodo=logOutAbonado"
 
 # HTTP Headers
 USER_AGENT: Final[str] = (
