@@ -7,7 +7,7 @@ import pytest
 from aiohttp import ClientConnectionError
 from aioresponses import aioresponses
 
-from pycalista_ista.const import LOGOUT_URL
+from pycalista_ista.const import DATA_URL, LOGIN_URL, LOGOUT_URL
 from pycalista_ista.exception_classes import (
     IstaConnectionError,
     IstaLoginError,
@@ -54,7 +54,7 @@ async def test_login_failure(ista_api_client: VirtualApi, mock_responses: aiores
         headers={"Location": "some_redirect_url"},
     )
     with pytest.raises(
-        IstaLoginError, match="Login failed - invalid credentials \(302 Redirect\)"
+        IstaLoginError, match=r"Login failed - invalid credentials \(302 Redirect\)"
     ):
         await ista_api_client.login()
 
@@ -173,12 +173,6 @@ async def test_get_devices_history_success(
 
     mock_get_readings(mock_responses, excel_file_content, start_str, end_str)
 
-    # Mock logout call which is now in finally block
-    mock_responses.get(LOGOUT_URL, status=200)
-
-    # Patch the parser call within the async function context if needed,
-    # but better to test parser separately. Assume parser works for this test.
-    # We mock the http call, the parser runs in executor.
     devices = await ista_api_client.get_devices_history(start_dt, end_dt)
     assert isinstance(devices, dict)
     assert len(devices) > 0  # Check based on your test excel file
@@ -199,9 +193,6 @@ async def test_get_devices_history_parser_error(
     # Provide invalid excel content
     invalid_excel_content = b"this is not excel"
     mock_get_readings(mock_responses, invalid_excel_content, start_str, end_str)
-
-    # Mock logout call which is now in finally block
-    mock_responses.get(LOGOUT_URL, status=200)
 
     # The error comes from the parser running in the executor
     with pytest.raises(
@@ -334,3 +325,390 @@ async def test_interpolate_clamps_to_boundaries(ista_api_client: VirtualApi):
     assert (
         pytest.approx(interpolated_val_2) == 250.1263
     )  # (250.123 + (250.128-250.123)/3 * 2)
+
+
+# ---------------------------------------------------------------------------
+# Session lifecycle
+# ---------------------------------------------------------------------------
+
+
+async def test_virtual_api_close_own_session():
+    """close() shuts down an internally created session."""
+    client = VirtualApi(TEST_EMAIL, TEST_PASSWORD)  # no external session
+    assert not client.session.closed
+    await client.close()
+    assert client.session.closed
+
+
+async def test_virtual_api_close_external_session_not_closed(
+    ista_api_client: VirtualApi,
+):
+    """close() does NOT close a session that was provided externally."""
+    session = ista_api_client.session
+    await ista_api_client.close()
+    assert not session.closed  # caller owns the session
+
+
+async def test_logout_exception_is_silenced(
+    ista_api_client: VirtualApi, mock_responses: aioresponses
+):
+    """logout() swallows exceptions so they don't block callers."""
+    from aiohttp import ClientConnectionError
+
+    mock_responses.get(LOGOUT_URL, exception=ClientConnectionError("no route"))
+    # Must not raise despite the connection failure
+    await ista_api_client.logout()
+
+
+async def test_virtual_api_close_idempotent():
+    """Calling close() twice on an owned session does not raise."""
+    client = VirtualApi(TEST_EMAIL, TEST_PASSWORD)
+    await client.close()
+    await client.close()  # second call must be safe
+
+
+async def test_virtual_api_async_context_manager():
+    """async with VirtualApi(...) closes the session on exit."""
+    async with VirtualApi(TEST_EMAIL, TEST_PASSWORD) as client:
+        assert not client.session.closed
+    assert client.session.closed
+
+
+# ---------------------------------------------------------------------------
+# _send_request edge cases
+# ---------------------------------------------------------------------------
+
+
+async def test_send_request_closed_session_raises():
+    """_send_request raises IstaConnectionError when the session is closed."""
+    client = VirtualApi(TEST_EMAIL, TEST_PASSWORD)
+    await client.close()
+
+    with pytest.raises(IstaConnectionError, match="Session is closed"):
+        await client._send_request("GET", LOGIN_URL)
+
+
+async def test_send_request_retries_on_503_then_succeeds(
+    ista_api_client: VirtualApi, mock_responses: aioresponses
+):
+    """A 503 on the first attempt triggers a retry that succeeds."""
+    from unittest.mock import AsyncMock, patch
+
+    url = DATA_URL
+    mock_responses.get(url, status=503)
+    mock_responses.get(url, status=200, body=b"ok")
+
+    with patch("pycalista_ista.virtual_api.asyncio.sleep", new_callable=AsyncMock):
+        response = await ista_api_client._send_request(
+            "GET", url, retry_attempts=1, relogin=False
+        )
+    assert response.status == 200
+
+
+async def test_send_request_exhausted_retries_raises(
+    ista_api_client: VirtualApi, mock_responses: aioresponses
+):
+    """IstaConnectionError is raised when all retry attempts are exhausted."""
+    from unittest.mock import AsyncMock, patch
+
+    url = DATA_URL
+    # Need MAX_RETRIES + 1 failures (initial attempt + 2 retries = 3 total)
+    for _ in range(3):
+        mock_responses.get(url, status=503)
+
+    with patch("pycalista_ista.virtual_api.asyncio.sleep", new_callable=AsyncMock):
+        with pytest.raises(IstaConnectionError):
+            await ista_api_client._send_request("GET", url, relogin=False)
+
+
+async def test_send_request_binary_response_does_not_trigger_relogin(
+    ista_api_client: VirtualApi, mock_responses: aioresponses
+):
+    """A binary (non-decodable) response does not trigger the session-expiry check."""
+    # Return Excel magic bytes – valid binary content
+    excel_magic = b"\xd0\xcf\x11\xe0" + b"\x00" * 100
+    mock_responses.get(
+        DATA_URL,
+        status=200,
+        headers={"Content-Type": "application/vnd.ms-excel"},
+        body=excel_magic,
+    )
+    # Should succeed without triggering relogin
+    response = await ista_api_client._send_request("GET", DATA_URL, relogin=False)
+    assert response.status == 200
+
+
+# ---------------------------------------------------------------------------
+# login() – metadata preload failure
+# ---------------------------------------------------------------------------
+
+
+async def test_login_unexpected_exception_propagates(
+    ista_api_client: VirtualApi, mock_responses: aioresponses
+):
+    """An unexpected exception inside login() propagates after logging."""
+    from unittest.mock import AsyncMock, patch
+
+    mock_responses.post(LOGIN_URL, status=200, body=b"")
+
+    with patch.object(
+        ista_api_client,
+        "_preload_reading_metadata",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("surprise"),
+    ):
+        with pytest.raises(RuntimeError, match="surprise"):
+            await ista_api_client.login()
+
+
+async def test_login_preload_metadata_failure(
+    ista_api_client: VirtualApi, mock_responses: aioresponses
+):
+    """If the metadata preload after login fails, IstaConnectionError propagates."""
+    from unittest.mock import AsyncMock, patch
+
+    # Login POST succeeds
+    mock_responses.post(LOGIN_URL, status=200, body=b"")
+    # Metadata preload GET fails
+    mock_responses.get(
+        f"{DATA_URL}?metodo=preCargaLecturasRadio",
+        status=500,
+    )
+
+    with patch("pycalista_ista.virtual_api.asyncio.sleep", new_callable=AsyncMock):
+        with pytest.raises(IstaConnectionError):
+            await ista_api_client.login()
+
+
+# ---------------------------------------------------------------------------
+# _get_readings – multi-chunk splitting
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "excel_file_content", ["consulta_2024-11-30_2025-01-01.xls"], indirect=True
+)
+async def test_get_readings_multi_chunk(
+    ista_api_client: VirtualApi,
+    mock_responses: aioresponses,
+    excel_file_content: bytes,
+):
+    """Date ranges >240 days are split into multiple chunk requests."""
+    from datetime import timedelta
+
+    # 300-day range → 2 chunks
+    start_dt = date(2024, 1, 1)
+    end_dt = start_dt + timedelta(days=299)
+
+    # Chunk 1: days 0-239
+    chunk1_end = start_dt + timedelta(days=239)
+    # Chunk 2: days 240-299
+    chunk2_start = chunk1_end + timedelta(days=1)
+
+    mock_get_readings(
+        mock_responses,
+        excel_file_content,
+        start_dt.strftime("%d/%m/%Y"),
+        chunk1_end.strftime("%d/%m/%Y"),
+    )
+    mock_get_readings(
+        mock_responses,
+        excel_file_content,
+        chunk2_start.strftime("%d/%m/%Y"),
+        end_dt.strftime("%d/%m/%Y"),
+    )
+
+    buffers = await ista_api_client._get_readings(start_dt, end_dt)
+    assert len(buffers) == 2
+
+
+async def test_get_readings_start_after_end_raises(ista_api_client: VirtualApi):
+    """_get_readings raises ValueError when start > end."""
+    with pytest.raises(ValueError, match="Start date must be before or equal"):
+        await ista_api_client._get_readings(date(2025, 2, 1), date(2025, 1, 1))
+
+
+# ---------------------------------------------------------------------------
+# merge_device_histories – edge cases
+# ---------------------------------------------------------------------------
+
+
+async def test_merge_skips_non_device_objects(ista_api_client: VirtualApi):
+    """merge_device_histories skips list entries that are not Device instances."""
+    from pycalista_ista.models import HeatingDevice
+
+    valid = HeatingDevice("S1", "Room")
+    valid.add_reading_value(100.0, datetime(2025, 1, 1))
+
+    # Inject a non-Device value under the same key
+    device_list = [{"S1": valid, "BAD": "not-a-device"}]  # type: ignore[list-item]
+    merged = ista_api_client.merge_device_histories(device_list)
+
+    assert "S1" in merged
+    assert "BAD" not in merged
+
+
+async def test_merge_device_histories_fallback_on_interpolation_error(
+    ista_api_client: VirtualApi,
+):
+    """When interpolation fails, the raw device is kept rather than dropped."""
+    from unittest.mock import patch
+
+    from pycalista_ista.models import HeatingDevice
+
+    device = HeatingDevice("S1", "Room")
+    device.add_reading_value(100.0, datetime(2025, 1, 1))
+
+    with patch.object(
+        ista_api_client,
+        "_interpolate_and_trim_device_reading",
+        side_effect=RuntimeError("boom"),
+    ):
+        result = ista_api_client.merge_device_histories([{"S1": device}])
+
+    # Device must still be present (fallback to raw)
+    assert "S1" in result
+
+
+# ---------------------------------------------------------------------------
+# _interpolate_and_trim – additional edge cases
+# ---------------------------------------------------------------------------
+
+
+async def test_interpolate_single_valid_reading(ista_api_client: VirtualApi):
+    """Fewer than 2 valid readings skips interpolation and returns as-is."""
+    device = HeatingDevice("X", "L")
+    device.add_reading_value(50.0, datetime(2025, 1, 1))
+    device.add_reading_value(None, datetime(2025, 1, 2))
+
+    fixed = ista_api_client._interpolate_and_trim_device_reading(device)
+    # Only the one valid reading should be returned; None is trimmed from edges
+    assert len(fixed.history) == 1
+    assert fixed.history[0].reading == 50.0
+
+
+async def test_interpolate_identical_timestamps_skips_gracefully(
+    ista_api_client: VirtualApi,
+):
+    """Two valid readings at the same timestamp do not cause a ZeroDivisionError."""
+    device = HeatingDevice("X", "L")
+    ts = datetime(2025, 1, 1)
+    device.add_reading_value(100.0, ts)
+    device.add_reading_value(None, datetime(2025, 1, 2))
+    # Same timestamp as first reading – edge case for time_span == 0
+    device.add_reading_value(120.0, ts)
+
+    # Should not raise; interpolation for the duplicate-timestamp gap is skipped
+    fixed = ista_api_client._interpolate_and_trim_device_reading(device)
+    assert fixed is not None
+
+
+# ---------------------------------------------------------------------------
+# _find_export_url
+# ---------------------------------------------------------------------------
+
+
+def test_find_export_url_returns_absolute_xls():
+    """Relative export href is made absolute and forced to XLS format (e=2)."""
+    html = (
+        '<a href="GesCon/GestionLecturas.do?d-999-e=1&6578706f7274=1">Export</a>'
+    )
+    url = VirtualApi._find_export_url(html)
+    assert url is not None
+    assert url.startswith("https://oficina.ista.es/")
+    assert "d-999-e=2" in url
+
+
+def test_find_export_url_with_fragment_filters_correctly():
+    """url_fragment restricts matches to links containing that substring."""
+    html = (
+        '<a href="GesCon/GestionFacturacion.do?d-148657-e=1&6578706f7274=1">Facturas</a>'
+        '<a href="GesCon/GestionLecturas.do?d-99-e=1&6578706f7274=1">Lecturas</a>'
+    )
+    inv_url = VirtualApi._find_export_url(html, url_fragment="GestionFacturacion")
+    lec_url = VirtualApi._find_export_url(html, url_fragment="GestionLecturas")
+
+    assert inv_url is not None and "GestionFacturacion" in inv_url
+    assert lec_url is not None and "GestionLecturas" in lec_url
+
+
+def test_find_export_url_no_match_returns_none():
+    """Returns None when no matching export link is found."""
+    assert VirtualApi._find_export_url("<html><body>nothing</body></html>") is None
+
+
+def test_find_export_url_fragment_no_match_returns_none():
+    """Returns None when the fragment filter eliminates all candidates."""
+    html = '<a href="GesCon/GestionLecturas.do?d-99-e=1&6578706f7274=1">Export</a>'
+    assert VirtualApi._find_export_url(html, url_fragment="GestionFacturacion") is None
+
+
+# ---------------------------------------------------------------------------
+# get_invoice_xls
+# ---------------------------------------------------------------------------
+
+
+def _make_invoice_xls_bytes() -> bytes:
+    """Return minimal invoice XLS bytes for mocking."""
+    from io import BytesIO
+    import xlwt
+
+    wb = xlwt.Workbook()
+    ws = wb.add_sheet("-")
+    for col, h in enumerate(["Fecha lectura", "Tipo equipo", "Importe"]):
+        ws.write(0, col, h)
+    ws.write(1, 0, "31/01/2026")
+    ws.write(1, 1, "Calefacción")
+    ws.write(1, 2, "80,12")
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+async def test_get_invoice_xls_success_with_link_in_html(
+    ista_api_client: VirtualApi, mock_responses: aioresponses
+):
+    """get_invoice_xls() finds the export link in HTML and downloads the XLS."""
+    from pycalista_ista.const import INVOICES_URL
+
+    export_path = "GesCon/GestionFacturacion.do?d-148657-e=1&metodo=listadoRecibos&6578706f7274=1"
+    listing_html = f'<a href="{export_path}">Excel</a>'
+
+    mock_responses.get(
+        f"{INVOICES_URL}?metodo=buscarRecibos",
+        status=200,
+        body=listing_html.encode(),
+    )
+    mock_responses.get(
+        f"https://oficina.ista.es/{export_path.replace('e=1', 'e=2')}",
+        status=200,
+        headers={"Content-Type": "application/vnd.ms-excel"},
+        body=_make_invoice_xls_bytes(),
+    )
+
+    invoices = await ista_api_client.get_invoice_xls()
+    assert len(invoices) == 1
+    assert invoices[0].invoice_id is None
+    assert invoices[0].amount is not None
+
+
+async def test_get_invoice_xls_fallback_url(
+    ista_api_client: VirtualApi, mock_responses: aioresponses
+):
+    """get_invoice_xls() falls back to the known URL when HTML has no export link."""
+    from pycalista_ista.const import INVOICE_XLS_FALLBACK_URL, INVOICES_URL
+
+    mock_responses.get(
+        f"{INVOICES_URL}?metodo=buscarRecibos",
+        status=200,
+        body=b"<html>no export link here</html>",
+    )
+    mock_responses.get(
+        INVOICE_XLS_FALLBACK_URL,
+        status=200,
+        headers={"Content-Type": "application/vnd.ms-excel"},
+        body=_make_invoice_xls_bytes(),
+    )
+
+    invoices = await ista_api_client.get_invoice_xls()
+    assert len(invoices) == 1

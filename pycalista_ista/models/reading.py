@@ -8,7 +8,7 @@ calculations.
 
 from __future__ import annotations
 
-import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,7 +34,7 @@ class Reading:
     """
 
     date: datetime
-    reading: float
+    reading: float | None
 
     def __post_init__(self) -> None:
         """Validate the reading value and convert date to UTC.
@@ -45,26 +45,32 @@ class Reading:
         if self.reading is not None and self.reading < 0:
             raise ValueError(f"Reading value cannot be negative: {self.reading}")
 
-        # Convert naive datetime to UTC
+        # Convert naive datetime to UTC.
+        # object.__setattr__ is the standard pattern for mutating a frozen dataclass
+        # inside __post_init__ (before the instance is fully constructed).
+        # Callers are encouraged to pass timezone-aware datetimes directly.
         if self.date.tzinfo is None:
             object.__setattr__(
-                self, "date", self.date.replace(tzinfo=datetime.timezone.utc)
+                self, "date", self.date.replace(tzinfo=timezone.utc)
             )
 
-    def __sub__(self, other: Reading) -> float:
+    def __sub__(self, other: Reading) -> float | None:
         """Calculate consumption between two readings.
 
         Args:
             other: The previous reading to subtract
 
         Returns:
-            The consumption value between the two readings
+            The consumption value between the two readings, or None if either
+            reading value is None (missing data).
 
         Raises:
             TypeError: If other is not a Reading instance
         """
         if not isinstance(other, Reading):
             raise TypeError(f"Cannot subtract {type(other)} from Reading")
+        if self.reading is None or other.reading is None:
+            return None
         return self.reading - other.reading
 
     def __lt__(self, other: Reading) -> bool:

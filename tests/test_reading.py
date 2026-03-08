@@ -67,3 +67,62 @@ def test_reading_string_representation():
 
     assert str(reading) == "100.5"
     assert repr(reading) == f"<Reading: 100.5 @ {date.isoformat()}>"
+
+
+def test_reading_none_value_is_valid():
+    """Reading accepts None as a value (missing data marker)."""
+    r = Reading(date=datetime(2025, 1, 1, tzinfo=timezone.utc), reading=None)
+    assert r.reading is None
+
+
+def test_reading_subtraction_none_self():
+    """__sub__ returns None when self.reading is None."""
+    r_none = Reading(date=datetime(2025, 1, 2, tzinfo=timezone.utc), reading=None)
+    r_val = Reading(date=datetime(2025, 1, 1, tzinfo=timezone.utc), reading=50.0)
+    assert (r_none - r_val) is None
+
+
+def test_reading_subtraction_none_other():
+    """__sub__ returns None when other.reading is None."""
+    r_val = Reading(date=datetime(2025, 1, 2, tzinfo=timezone.utc), reading=100.0)
+    r_none = Reading(date=datetime(2025, 1, 1, tzinfo=timezone.utc), reading=None)
+    assert (r_val - r_none) is None
+
+
+def test_reading_subtraction_both_none():
+    """__sub__ returns None when both readings are None."""
+    d1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    d2 = datetime(2025, 1, 2, tzinfo=timezone.utc)
+    assert (Reading(d2, None) - Reading(d1, None)) is None
+
+
+def test_reading_subtraction_type_error():
+    """__sub__ raises TypeError for non-Reading operands."""
+    import pytest
+
+    r = Reading(date=datetime(2025, 1, 1, tzinfo=timezone.utc), reading=100.0)
+    with pytest.raises(TypeError):
+        r - 42  # type: ignore[operator]
+
+
+def test_reading_comparison_type_error():
+    """__lt__ raises TypeError for non-Reading operands."""
+    import pytest
+
+    r = Reading(date=datetime(2025, 1, 1, tzinfo=timezone.utc), reading=100.0)
+    with pytest.raises(TypeError):
+        r < "not a reading"  # type: ignore[operator]
+
+
+def test_reading_equality_with_non_reading():
+    """__eq__ returns NotImplemented for non-Reading objects."""
+    r = Reading(date=datetime(2025, 1, 1, tzinfo=timezone.utc), reading=100.0)
+    assert r.__eq__("not a reading") is NotImplemented
+
+
+def test_reading_negative_value_raises():
+    """Reading with a negative value raises ValueError."""
+    import pytest
+
+    with pytest.raises(ValueError, match="Reading value cannot be negative"):
+        Reading(date=datetime(2025, 1, 1, tzinfo=timezone.utc), reading=-1.0)
