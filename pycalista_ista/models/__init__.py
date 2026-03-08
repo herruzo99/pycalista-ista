@@ -13,18 +13,22 @@ different types of utility meters and their readings. The models include:
 
 from __future__ import annotations
 
+from .billed_reading import BilledReading
 from .cold_water_device import ColdWaterDevice
 from .device import Device
 from .heating_device import HeatingDevice
 from .hot_water_device import HotWaterDevice
+from .invoice import Invoice
 from .reading import Reading
 from .water_device import WaterDevice
 
 __all__ = [
+    "BilledReading",
     "Device",
     "WaterDevice",
     "HotWaterDevice",
     "ColdWaterDevice",
     "HeatingDevice",
+    "Invoice",
     "Reading",
 ]

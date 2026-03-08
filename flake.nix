@@ -26,12 +26,12 @@
           # Using Python 3.12 as specified in pyproject.toml
           pythonWithProjectDeps = pkgs.python3.withPackages (ps: with ps; [
             # Runtime dependencies from [project].dependencies
-            requests
             pandas
             xlrd
             unidecode
             aiohttp
             yarl
+            beautifulsoup4
 
             # Build system dependencies
             setuptools

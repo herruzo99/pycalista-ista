@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import IO, Any, Final, TypeVar
+from typing import IO, Any, Final
 
 import pandas as pd
 from unidecode import unidecode
 
 # Use the specific exception class
+from .const import DATE_FORMAT, DATE_HEADER_FORMAT
 from .exception_classes import IstaParserError
 from .models.cold_water_device import ColdWaterDevice
 from .models.device import Device
@@ -23,19 +24,18 @@ from .models.hot_water_device import HotWaterDevice
 
 _LOGGER: Final = logging.getLogger(__name__)
 
-# Type variable for device dictionaries
-DeviceDict = TypeVar("DeviceDict", bound=dict[str, Device])
-
 # Constants for Excel parsing
-# Define expected metadata columns explicitly for validation
-EXPECTED_METADATA_COLUMNS: Final[set[str]] = {"tipo", "n_serie", "ubicacion"}
+# Columns recognised as metadata: skipped during date-header processing and
+# excluded from readings. Add new API columns here as they appear.
+EXPECTED_METADATA_COLUMNS: Final[set[str]] = {
+    "tipo", "n_serie", "ubicacion", "unidad_medida"
+}
+# Subset that must actually be present for the parser to produce output.
+REQUIRED_METADATA_COLUMNS: Final[set[str]] = {"tipo", "n_serie", "ubicacion"}
 # Normalized header names (lowercase, underscores, no accents)
 NORMALIZED_TYPE_HEADER: Final[str] = "tipo"
 NORMALIZED_SERIAL_HEADER: Final[str] = "n_serie"
 NORMALIZED_LOCATION_HEADER: Final[str] = "ubicacion"
-
-DATE_FORMAT: Final[str] = "%d/%m/%Y"  # Full date format including year
-DATE_HEADER_FORMAT: Final[str] = "%d/%m"  # Format expected in headers initially
 
 # Device type identifiers (normalized)
 COLD_WATER_TYPE_ID: Final[str] = "radio agua fria"
@@ -114,61 +114,33 @@ class ExcelParser:
         return normalized_headers
 
     def _assign_years_to_date_headers(self, headers: list[str]) -> list[str]:
-        """Assigns the correct year to date headers (e.g., 'dd/mm').
+        """Normalises date headers (e.g., 'dd/mm/yy') to full 'dd/mm/yyyy' strings.
 
-        Iterates through headers, identifying date-like strings ('dd/mm').
-        Assigns the `current_year` context, decrementing the year if the month
-        decreases compared to the previous date header (indicating year rollover).
+        The Ista API now includes a 2-digit year in every date column header,
+        so no year inference is required. Each header is parsed with
+        DATE_HEADER_FORMAT and reformatted using DATE_FORMAT.
+        Metadata column names are passed through unchanged.
 
         Args:
             headers: List of normalized headers.
 
         Returns:
-            List of headers with years assigned to date columns ('dd/mm/yyyy').
+            List of headers with date columns expanded to 'dd/mm/yyyy'.
             Metadata columns remain unchanged.
 
         Raises:
-            IstaParserError: If a header looks like a date but cannot be parsed.
+            IstaParserError: If a non-metadata header cannot be parsed as a date.
         """
         processed_headers: list[str] = []
-        assigned_year = self.current_year
-        last_processed_month: int | None = None
 
         for header in headers:
             if header in EXPECTED_METADATA_COLUMNS:
                 processed_headers.append(header)
                 continue
 
-            # Try parsing as 'dd/mm'
             try:
-                # Use a dummy year (like 2000) for parsing, we only care about day/month
-                parsed_date = datetime.strptime(
-                    f"{header}/2000", f"{DATE_HEADER_FORMAT}/%Y"
-                )
-                current_month = parsed_date.month
-
-                # Check for year rollover (month decreases compared to last processed date)
-                if (
-                    last_processed_month is not None
-                    and current_month > last_processed_month
-                ):
-                    assigned_year -= 1
-                    _LOGGER.debug(
-                        "Detected year rollover parsing headers. Header '%s' (month %d) follows "
-                        "header with month %d. Assigning new year: %d",
-                        header,
-                        current_month,
-                        last_processed_month,
-                        assigned_year,
-                    )
-
-                # Format header with the assigned year
-                full_date_header = f"{header}/{assigned_year}"
-                processed_headers.append(full_date_header)
-                last_processed_month = (
-                    current_month  # Update last month for next iteration
-                )
-
+                parsed_date = datetime.strptime(header, DATE_HEADER_FORMAT)
+                processed_headers.append(parsed_date.strftime(DATE_FORMAT))
             except ValueError:
                 _LOGGER.warning(
                     "Header '%s' could not be parsed as a date with format '%s'. "
@@ -176,14 +148,10 @@ class ExcelParser:
                     header,
                     DATE_HEADER_FORMAT,
                 )
-                # Option 1: Treat as metadata (might hide errors)
-                # processed_headers.append(header)
-                # Option 2: Raise an error if strict date format is expected
                 raise IstaParserError(
-                    f"Unexpected header format: '{header}'. Expected metadata or 'dd/mm'."
+                    f"Unexpected header format: '{header}'. Expected metadata or '{DATE_HEADER_FORMAT}'."
                 )
             except Exception as e:
-                # Catch other unexpected errors during date processing
                 _LOGGER.exception(
                     "Unexpected error while processing header '%s'", header
                 )
@@ -204,9 +172,13 @@ class ExcelParser:
             IstaParserError: If file reading, header processing, or validation fails.
         """
         try:
-            # Ensure file pointer is at the beginning
+            # Detect engine from magic bytes: PK = ZIP/XLSX, OLE2 = XLS
             self.io_file.seek(0)
-            df = pd.read_excel(self.io_file, engine="xlrd")
+            magic = self.io_file.read(4)
+            self.io_file.seek(0)
+            engine = "openpyxl" if magic[:2] == b"PK" else "xlrd"
+            _LOGGER.debug("Detected Excel engine: %s", engine)
+            df = pd.read_excel(self.io_file, engine=engine)
             _LOGGER.debug("Successfully read Excel file into DataFrame.")
 
         except Exception as err:
@@ -247,7 +219,7 @@ class ExcelParser:
         df.columns = final_headers
 
         # --- Metadata Validation ---
-        missing_metadata = EXPECTED_METADATA_COLUMNS - set(df.columns)
+        missing_metadata = REQUIRED_METADATA_COLUMNS - set(df.columns)
         if missing_metadata:
             _LOGGER.error(
                 "DataFrame is missing required metadata columns. Missing: %s. Available: %s",
@@ -258,8 +230,8 @@ class ExcelParser:
                 f"Missing required metadata columns: {missing_metadata}"
             )
 
-        # Fill NaN in metadata columns with empty strings for consistency
-        metadata_cols_list = list(EXPECTED_METADATA_COLUMNS)
+        # Fill NaN in present metadata columns with empty strings for consistency
+        metadata_cols_list = [c for c in EXPECTED_METADATA_COLUMNS if c in df.columns]
         df[metadata_cols_list] = df[metadata_cols_list].fillna("")
         _LOGGER.debug(
             "DataFrame prepared for processing with %d rows and columns: %s",
@@ -268,7 +240,7 @@ class ExcelParser:
         )
         return df
 
-    def get_devices_history(self) -> DeviceDict:
+    def get_devices_history(self) -> dict[str, Device]:
         """Parses the Excel data and returns device histories.
 
         Reads the Excel file, processes headers and rows, creates Device objects,
@@ -293,7 +265,7 @@ class ExcelParser:
             _LOGGER.info("Parsing skipped as Excel file is empty.")
             return {}  # Return empty dict if DataFrame is empty
 
-        devices: DeviceDict = {}
+        devices: dict[str, Device] = {}
         processed_rows = 0
         skipped_rows = 0
 
@@ -507,8 +479,8 @@ class ExcelParser:
                 skipped_count += 1
 
         _LOGGER.debug(
-            "Finished processing readings for device %s. Added: %d, Skipped: %s.",
+            "Finished processing readings for device %s. Added: %d, Skipped: %d.",
+            device.serial_number,
             added_count,
             skipped_count,
-            device.serial_number,
         )

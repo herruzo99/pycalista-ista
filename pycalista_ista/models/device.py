@@ -53,18 +53,18 @@ class Device:
         self.location: str = location or ""
         self.history: list[Reading] = []
 
-    def add_reading_value(self, reading_value: float, date: datetime) -> None:
+    def add_reading_value(self, reading_value: float | None, date: datetime) -> None:
         """Add a new reading using raw values.
 
         This is a convenience method that creates a Reading object
         and adds it to the device history.
 
         Args:
-            reading_value: The meter reading value
+            reading_value: The meter reading value, or None for a missing reading.
             date: Timestamp of the reading
 
         Raises:
-            ValueError: If reading_value is negative
+            ValueError: If reading_value is negative (raised inside Reading).
         """
         reading = Reading(date=date, reading=reading_value)
         self.add_reading(reading)
@@ -72,16 +72,24 @@ class Device:
     def add_reading(self, reading: Reading) -> None:
         """Add a new reading to the device history.
 
-        The reading is inserted in chronological order.
+        The reading is inserted in chronological order. Readings with a
+        duplicate timestamp are silently ignored.
 
         Args:
-            reading: The Reading object to add
-
-        Raises:
-            ValueError: If the reading value is negative
+            reading: The Reading object to add.
+                     Negative values are rejected by Reading.__post_init__
+                     before reaching this method.
         """
-        if reading.reading is not None and reading.reading < 0:
-            raise ValueError(f"Reading cannot be negative: {reading}")
+        # Reject duplicate timestamps to keep history consistent.
+        # The merge layer also deduplicates, but enforcing it here prevents
+        # callers from accidentally building inconsistent history.
+        if any(r.date == reading.date for r in self.history):
+            _LOGGER.debug(
+                "Skipping duplicate reading for device %s at %s",
+                self.serial_number,
+                reading.date.isoformat(),
+            )
+            return
 
         if not self.history:
             self.history.append(reading)
@@ -94,6 +102,7 @@ class Device:
 
         Returns:
             Reading object with consumption value, or None if insufficient data
+            or if either of the last two readings has a None value.
         """
         if len(self.history) < 2:
             _LOGGER.debug(
@@ -106,6 +115,13 @@ class Device:
         previous_reading = self.history[-2]
         consumption = last_reading - previous_reading
 
+        if consumption is None:
+            _LOGGER.debug(
+                "Cannot calculate consumption for device %s: one or both readings have None value",
+                self.serial_number,
+            )
+            return None
+
         return Reading(date=last_reading.date, reading=consumption)
 
     @property
@@ -116,6 +132,16 @@ class Device:
             Most recent Reading object, or None if no readings exist
         """
         return self.history[-1] if self.history else None
+
+    def __eq__(self, other: object) -> bool:
+        """Compare devices by serial number."""
+        if not isinstance(other, Device):
+            return NotImplemented
+        return self.serial_number == other.serial_number
+
+    def __hash__(self) -> int:
+        """Hash by serial number so devices can be used in sets and as dict keys."""
+        return hash(self.serial_number)
 
     def __repr__(self) -> str:
         """Get string representation of the device.

@@ -116,3 +116,55 @@ def test_device_representation():
 
     assert repr(device1) == "<Device at Kitchen (SN: 12345)>"
     assert repr(device2) == "<Device (SN: 67890)>"
+
+
+def test_device_equality_same_serial():
+    """Devices with the same serial number are equal regardless of location."""
+    assert Device("ABC", "Room A") == Device("ABC", "Room B")
+    assert Device("ABC") == Device("ABC")
+
+
+def test_device_equality_different_serial():
+    """Devices with different serial numbers are not equal."""
+    assert Device("ABC") != Device("XYZ")
+
+
+def test_device_eq_non_device_returns_not_implemented():
+    """Comparing a Device with a non-Device returns NotImplemented."""
+    result = Device("ABC").__eq__("ABC")
+    assert result is NotImplemented
+
+
+def test_device_hash_equal_devices_same_hash():
+    """Equal devices produce the same hash."""
+    assert hash(Device("ABC", "L1")) == hash(Device("ABC", "L2"))
+
+
+def test_device_usable_as_dict_key():
+    """Devices can be used as dictionary keys (requires __hash__)."""
+    d1 = Device("S1", "Kitchen")
+    d2 = Device("S2", "Bathroom")
+    mapping = {d1: "heating", d2: "water"}
+    assert mapping[Device("S1")] == "heating"
+
+
+def test_device_usable_in_set():
+    """Devices with the same serial are deduplicated in a set."""
+    s = {Device("X", "A"), Device("X", "B"), Device("Y")}
+    assert len(s) == 2
+
+
+def test_last_consumption_with_none_reading():
+    """last_consumption returns None when the last reading value is None."""
+    device = Device("12345")
+    device.add_reading_value(100.0, datetime(2025, 1, 1, tzinfo=timezone.utc))
+    device.add_reading_value(None, datetime(2025, 1, 2, tzinfo=timezone.utc))
+    assert device.last_consumption is None
+
+
+def test_add_reading_none_value_accepted():
+    """add_reading_value accepts None (missing reading) without raising."""
+    device = Device("12345")
+    device.add_reading_value(None, datetime(2025, 1, 1, tzinfo=timezone.utc))
+    assert len(device.history) == 1
+    assert device.history[0].reading is None

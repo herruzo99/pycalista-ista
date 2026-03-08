@@ -9,17 +9,20 @@ from __future__ import annotations
 from typing import Final
 
 from .__version import __version__
-from .exception_classes import (  # Updated exception names
+from .const import INCIDENCE_NAMES
+from .exception_classes import (
     IstaApiError,
     IstaConnectionError,
     IstaLoginError,
     IstaParserError,
 )
 from .models import (
+    BilledReading,
     ColdWaterDevice,
     Device,
     HeatingDevice,
     HotWaterDevice,
+    Invoice,
     Reading,
     WaterDevice,
 )
@@ -39,7 +42,12 @@ __all__ = [
     "ColdWaterDevice",
     "HeatingDevice",
     "Reading",
-    # Exceptions (Updated Names)
+    # Billing models
+    "Invoice",
+    "BilledReading",
+    # Constants
+    "INCIDENCE_NAMES",
+    # Exceptions
     "IstaApiError",
     "IstaConnectionError",
     "IstaLoginError",

@@ -11,14 +11,14 @@ import asyncio
 import io
 import logging
 from datetime import date, timedelta
-from typing import Any, Final, TypeVar
+from typing import Any, Final
 from urllib.parse import quote
 
 import aiohttp
 from aiohttp import ClientError, ClientResponseError, ClientSession
 from yarl import URL
 
-from .const import DATA_URL, LOGIN_URL, LOGOUT_URL, USER_AGENT
+from .const import CONSUMPTION_URL, DATA_URL, DATE_FORMAT, INVOICE_PDF_URL, INVOICE_XLS_FALLBACK_URL, INVOICES_URL, LOGIN_URL, LOGOUT_URL, USER_AGENT
 from .excel_parser import ExcelParser
 from .exception_classes import (
     IstaApiError,
@@ -26,11 +26,14 @@ from .exception_classes import (
     IstaLoginError,
     IstaParserError,
 )
+from .consumption_parser import ConsumptionParser
+from .invoice_parser import InvoiceParser
+from .invoice_xls_parser import InvoiceXlsParser
 from .models import Device
+from .models.billed_reading import BilledReading
+from .models.invoice import Invoice
 
 _LOGGER = logging.getLogger(__name__)
-# Type variable for device history dictionaries
-DeviceDict = TypeVar("DeviceDict", bound=dict[str, Device])
 
 # Constants
 MAX_RETRIES: Final = 2
@@ -38,7 +41,6 @@ RETRY_BACKOFF: Final = 2
 RETRY_STATUS_CODES: Final = {408, 429, 502, 503, 504}
 MAX_DAYS_PER_REQUEST: Final = 240
 EXCEL_CONTENT_TYPE: Final = "application/vnd.ms-excel;charset=iso-8859-1"
-DATE_FORMAT: Final = "%d/%m/%Y"
 REQUEST_TIMEOUT: Final = 30  # seconds
 
 
@@ -82,6 +84,12 @@ class VirtualApi:
         if self._close_session and self.session and not self.session.closed:
             await self.session.close()
 
+    async def __aenter__(self) -> "VirtualApi":
+        return self
+
+    async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        await self.close()
+
     async def _send_request(
         self,
         method: str,
@@ -119,10 +127,16 @@ class VirtualApi:
 
         try:
             response = await self.session.request(method, url, **kwargs)
+            # Read body once; reused for logging and session-expiry detection.
+            response_text: str = ""
             try:
-                response_text_snippet = (await response.text())[:250].replace("\n", "")
+                response_text = await response.text()
+                response_text_snippet = response_text[:250].replace("\n", "")
             except UnicodeDecodeError:
                 response_text_snippet = "<binary content>"
+                _LOGGER.debug(
+                    "Response content is binary, skipping session expiry check."
+                )
 
             _LOGGER.debug(
                 "Received response: Status=%s, Content-Type=%s, URL=%s, Snippet=%s",
@@ -135,15 +149,6 @@ class VirtualApi:
             # Check for potential session expiry/redirect to login page
             # This check might need adjustment based on actual redirect behavior
             if response.status == 200:
-                # Heuristic: If we get HTML back on an API call, it might be the login page
-                try:
-                    response_text = await response.text()
-                except UnicodeDecodeError:
-                    _LOGGER.debug(
-                        "Response content is binary, skipping session expiry check."
-                    )
-                    response_text = ""
-
                 if (
                     "GestionOficinaVirtual.do" in response_text
                     and 'type="password"' in response_text
@@ -154,14 +159,13 @@ class VirtualApi:
                         url,
                     )
                     if await self.relogin():  # Attempt relogin
-                        # Retry the original request *once* after successful relogin
+                        # Retry through _send_request with relogin disabled to prevent
+                        # infinite recursion while still getting full response validation.
                         _LOGGER.debug(
                             "Relogin successful, retrying original request to %s", url
                         )
-                        response = await self.session.request(method, url, **kwargs)
-                        _LOGGER.debug(
-                            "Retry request after relogin returned status: %s",
-                            response.status,
+                        return await self._send_request(
+                            method, url, retry_attempts, relogin=False, **kwargs
                         )
                     else:
                         # Relogin failed, raise specific error
@@ -234,20 +238,13 @@ class VirtualApi:
         Uses a lock to prevent concurrent login attempts.
 
         Returns:
-            True if login successful, False otherwise.
+            True if login was successful.
 
         Raises:
-            IstaLoginError: If authentication fails.
-            IstaConnectionError: If the request fails.
+            IstaLoginError: If authentication fails (e.g. bad credentials, 302 redirect).
+            IstaConnectionError: If the network request fails.
         """
         async with self._login_lock:
-            # Check if already logged in (e.g., check for a specific cookie)
-            # This check depends on how Ista manages sessions. Example:
-            # if any(cookie.key == 'JSESSIONID' for cookie in self.session.cookie_jar):
-            #     _LOGGER.debug("Already logged in (session cookie found).")
-            #     # Optionally verify session validity here if possible
-            #     return True
-
             _LOGGER.info("Attempting to log in user: %s", self.username)
             data = {
                 "metodo": "loginAbonado",
@@ -275,12 +272,14 @@ class VirtualApi:
                     await self._preload_reading_metadata()
                     return True
 
-                # Handle other unexpected statuses if necessary, though raise_for_status in _send_request might catch them
-                # But _send_request returns response even for non-200 if we don't raise there.
-                # Actually _send_request calls raise_for_status() at the end.
-                # So if we are here, status is 2xx.
-                # If it's not 200 (and not 302 which we handled), we might want to log it.
-
+                # _send_request already called raise_for_status(), so any non-2xx would
+                # have been raised as IstaConnectionError. We only reach here for unexpected
+                # 2xx statuses other than 200 (e.g. 201). Treat as success.
+                _LOGGER.warning(
+                    "Login for %s returned unexpected 2xx status %d. Treating as success.",
+                    self.username,
+                    response.status,
+                )
                 return True
 
             except IstaConnectionError as err:
@@ -561,7 +560,7 @@ class VirtualApi:
                 )
                 return {}  # Return empty dict if no files were fetched
 
-            device_lists: list[DeviceDict] = []
+            device_lists: list[dict[str, Device]] = []
             loop = asyncio.get_running_loop()
 
             # Process parsing in executor as pandas/xlrd are synchronous
@@ -625,10 +624,8 @@ class VirtualApi:
         except Exception:
             _LOGGER.exception("An unexpected error occurred in get_devices_history.")
             raise
-        finally:
-            await self.logout()
 
-    def merge_device_histories(self, device_lists: list[DeviceDict]) -> DeviceDict:
+    def merge_device_histories(self, device_lists: list[dict[str, Device]]) -> dict[str, Device]:
         """Merge device histories from multiple time periods.
 
         This method combines historical readings from different time periods
@@ -641,7 +638,7 @@ class VirtualApi:
         Returns:
             Dictionary with merged and interpolated device histories.
         """
-        merged_devices: DeviceDict = {}
+        merged_devices: dict[str, Device] = {}
         _LOGGER.debug("Merging %d list(s) of parsed devices.", len(device_lists))
 
         for i, device_list in enumerate(device_lists):
@@ -687,7 +684,7 @@ class VirtualApi:
             "Finished merging. Now interpolating and trimming %d devices.",
             len(merged_devices),
         )
-        final_devices: DeviceDict = {}
+        final_devices: dict[str, Device] = {}
         for serial_number, device in merged_devices.items():
             try:
                 final_devices[serial_number] = (
@@ -695,11 +692,13 @@ class VirtualApi:
                 )
             except Exception as e:
                 _LOGGER.error(
-                    "Failed to interpolate readings for device %s. It will be excluded from the final results. Error: %s",
+                    "Failed to interpolate readings for device %s. "
+                    "Falling back to raw readings without interpolation. Error: %s",
                     serial_number,
                     e,
                     exc_info=True,
                 )
+                final_devices[serial_number] = device
 
         _LOGGER.debug(
             "Finished merging and interpolation, resulting in %d final devices.",
@@ -834,3 +833,245 @@ class VirtualApi:
             len(fixed_device.history),
         )
         return fixed_device
+
+    async def get_invoices(self) -> list[Invoice]:
+        """Fetch the invoice listing from the portal.
+
+        Returns:
+            List of Invoice objects parsed from the invoice listing page.
+
+        Raises:
+            IstaConnectionError: If the request fails.
+            IstaLoginError: If the session has expired and relogin failed.
+            IstaParserError: If the HTML cannot be parsed.
+        """
+        _LOGGER.info("Fetching invoice list.")
+        params = {"metodo": "buscarRecibos"}
+        try:
+            response = await self._send_request("GET", INVOICES_URL, params=params)
+            html = await response.text()
+        except (IstaConnectionError, IstaLoginError) as err:
+            _LOGGER.error("Failed to fetch invoice list: %s", err)
+            raise
+
+        try:
+            parser = InvoiceParser()
+            invoices = parser.parse(html)
+        except IstaParserError:
+            _LOGGER.error("Failed to parse invoice list HTML.", exc_info=True)
+            raise
+
+        _LOGGER.info("Successfully retrieved %d invoice(s).", len(invoices))
+        return invoices
+
+    async def get_invoice_pdf(self, invoice_id: str) -> bytes:
+        """Download a single invoice as a PDF.
+
+        Args:
+            invoice_id: The opaque server-side invoice ID (from Invoice.invoice_id).
+
+        Returns:
+            Raw PDF bytes.
+
+        Raises:
+            IstaConnectionError: If the request fails.
+            IstaLoginError: If the session has expired and relogin failed.
+            IstaApiError: If the response is not a PDF.
+        """
+        _LOGGER.info("Downloading PDF for invoice_id=%s.", invoice_id)
+        params = {
+            "metodo": "duplicarReciboIndividualCalista",
+            "idRecibo": invoice_id,
+        }
+        try:
+            response = await self._send_request("GET", INVOICE_PDF_URL, params=params)
+            content_type = response.headers.get("Content-Type", "")
+            content = await response.read()
+        except (IstaConnectionError, IstaLoginError) as err:
+            _LOGGER.error("Failed to download invoice PDF %s: %s", invoice_id, err)
+            raise
+
+        # Validate it looks like a PDF (magic bytes %PDF)
+        if not content.startswith(b"%PDF") and "pdf" not in content_type.lower():
+            _LOGGER.error(
+                "Expected PDF for invoice_id=%s but got Content-Type=%s, first bytes=%s",
+                invoice_id,
+                content_type,
+                content[:16],
+            )
+            raise IstaApiError(
+                f"Expected PDF response for invoice {invoice_id}, got Content-Type: {content_type}"
+            )
+
+        _LOGGER.debug(
+            "Downloaded PDF for invoice_id=%s (%d bytes).", invoice_id, len(content)
+        )
+        return content
+
+    async def get_invoice_xls(self) -> list[Invoice]:
+        """Fetch the full invoice history as an XLS export (Mis Recibos → Excel).
+
+        Flow:
+          1. GET the invoice listing page to establish session state.
+          2. Find the Excel export link in the HTML.
+          3. GET the XLS and parse it.
+
+        Returns:
+            List of Invoice objects parsed from the XLS. invoice_id is "" for all
+            entries (the XLS does not include server-side IDs).
+
+        Raises:
+            IstaConnectionError: If any request fails.
+            IstaLoginError: If the session has expired and relogin failed.
+            IstaParserError: If the XLS cannot be parsed.
+        """
+        _LOGGER.info("Fetching invoice XLS export.")
+        params = {"metodo": "buscarRecibos"}
+
+        # 1. Fetch invoice listing page (establishes session state + gives us the export link)
+        try:
+            response = await self._send_request("GET", INVOICES_URL, params=params)
+            html = await response.text()
+        except (IstaConnectionError, IstaLoginError) as err:
+            _LOGGER.error("Failed to fetch invoice listing page: %s", err)
+            raise
+
+        # 2. Find export link, fall back to known URL if not found
+        export_url = self._find_export_url(html, url_fragment="GestionFacturacion")
+        if export_url:
+            _LOGGER.debug("Found invoice XLS export URL: %s", export_url)
+        else:
+            _LOGGER.warning(
+                "Could not find invoice XLS export link in HTML; using fallback URL."
+            )
+            export_url = INVOICE_XLS_FALLBACK_URL
+
+        # 3. Download and parse the XLS
+        try:
+            xls_response = await self._send_request("GET", export_url)
+            xls_content = await xls_response.read()
+        except (IstaConnectionError, IstaLoginError) as err:
+            _LOGGER.error("Failed to download invoice XLS: %s", err)
+            raise
+
+        try:
+            parser = InvoiceXlsParser()
+            invoices = parser.parse(io.BytesIO(xls_content))
+        except IstaParserError:
+            _LOGGER.error("Failed to parse invoice XLS.", exc_info=True)
+            raise
+
+        _LOGGER.info("Successfully retrieved %d invoice XLS row(s).", len(invoices))
+        return invoices
+
+    @staticmethod
+    def _find_export_url(html: str, url_fragment: str | None = None) -> str | None:
+        """Find a display-tag Excel export URL in an HTML page.
+
+        Looks for anchor tags whose href contains the hex-encoded export flag
+        ``6578706f7274`` (= "export"), optionally filtered by a substring of the
+        URL (e.g. ``"GestionFacturacion"`` to target only invoice export links).
+        Forces XLS format by rewriting ``d-NNNNN-e=N`` → ``d-NNNNN-e=2``.
+
+        Args:
+            html: Raw HTML from a portal page.
+            url_fragment: Optional substring that the href must contain.
+
+        Returns:
+            Absolute URL string, or None if not found.
+        """
+        import re
+
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        def _to_absolute(href: str) -> str:
+            if not href.startswith("http"):
+                href = f"https://oficina.ista.es/{href.lstrip('/')}"
+            return re.sub(r"(d-\d+-e)=\d+", r"\1=2", href)
+
+        for link in soup.find_all("a", href=re.compile(r"6578706f7274")):
+            href = link.get("href", "")
+            if href and (url_fragment is None or url_fragment in href):
+                return _to_absolute(href)
+
+        # Fallback: any display-tag export link (only when no fragment filter)
+        if url_fragment is None:
+            for link in soup.find_all("a", href=re.compile(r"d-\d+-e=\d+")):
+                href = link.get("href", "")
+                if href:
+                    return _to_absolute(href)
+
+        return None
+
+    async def get_billed_consumption(self) -> list[BilledReading]:
+        """Fetch all billed consumption readings (Mis Consumos).
+
+        Flow:
+          1. GET the search page to establish session state.
+          2. POST to trigger the search and receive results HTML.
+          3. Parse the HTML to find the Excel export link.
+          4. GET the export XLS and parse it.
+
+        Returns:
+            List of BilledReading objects, newest first.
+
+        Raises:
+            IstaConnectionError: If any request fails.
+            IstaLoginError: If the session has expired and relogin failed.
+            IstaParserError: If the HTML or XLS cannot be parsed.
+            IstaApiError: If the export link cannot be found in the page.
+        """
+        _LOGGER.info("Fetching billed consumption data.")
+        params = {"metodo": "buscarLecturas"}
+
+        # 1. Preload
+        try:
+            await self._send_request("GET", CONSUMPTION_URL, params=params)
+        except (IstaConnectionError, IstaLoginError) as err:
+            _LOGGER.error("Failed to preload billed consumption page: %s", err)
+            raise
+
+        # 2. POST search
+        data = {
+            "metodo": "buscarLecturas",
+            "idAbonado": "",
+            "validacion": "true",
+        }
+        try:
+            response = await self._send_request(
+                "POST", CONSUMPTION_URL, params=params, data=data
+            )
+            html = await response.text()
+        except (IstaConnectionError, IstaLoginError) as err:
+            _LOGGER.error("Failed to fetch billed consumption search results: %s", err)
+            raise
+
+        # 3. Find the Excel export link in the HTML
+        export_url = self._find_export_url(html)
+        if not export_url:
+            raise IstaApiError(
+                "Could not find Excel export link in billed consumption page. "
+                "The page structure may have changed."
+            )
+        _LOGGER.debug("Found billed consumption export URL: %s", export_url)
+
+        # 4. Download and parse the XLS
+        try:
+            xls_response = await self._send_request("GET", export_url)
+            xls_content = await xls_response.read()
+        except (IstaConnectionError, IstaLoginError) as err:
+            _LOGGER.error("Failed to download billed consumption XLS: %s", err)
+            raise
+
+        try:
+            parser = ConsumptionParser()
+            readings = parser.parse(io.BytesIO(xls_content))
+        except IstaParserError:
+            _LOGGER.error("Failed to parse billed consumption XLS.", exc_info=True)
+            raise
+
+        _LOGGER.info("Successfully retrieved %d billed reading(s).", len(readings))
+        return readings
+
