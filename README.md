@@ -20,6 +20,8 @@ This project is based on [ecotrend-ista](https://github.com/Ludy87/ecotrend-ista
 -   **Asynchronous:** Uses `asyncio` and `aiohttp` for non-blocking I/O.
 -   Login and session management with automatic cookie handling.
 -   Retrieve consumption data for heating and water meters.
+-   **Billed Consumption**: Retrieve billed readings and historical consumption data.
+-   **Invoice Parsing**: Support for extracting data from HTML invoice lists and Excel exports.
 -   Parse Excel reports (`.xls`, `.xlsx`) from Ista Calista using `pandas` and `openpyxl`.
 -   Support for different meter types (heating, hot water, cold water).
 -   Automatic handling of session expiration and relogin attempts.
@@ -34,7 +36,7 @@ Requires Python 3.12+
 pip install pycalista-ista
 ```
 
-This will install the library along with its dependencies (`aiohttp`, `pandas`, `openpyxl`, `unidecode`, `yarl`).
+This will install the library along with its dependencies (`aiohttp`, `pandas`, `openpyxl`, `unidecode`, `yarl`, `beautifulsoup4`).
 
 ## Usage
 
@@ -74,7 +76,11 @@ async def main():
                     print("Last Reading: N/A")
                 # Access full history if needed: device.history
 
-        except IstaLoginError as err:
+            # Or get billed consumption (async)
++           billed = await client.get_billed_consumption()
++           print(f"Retrieved {len(billed)} billed readings.")
++
+         except IstaLoginError as err:
             print(f"Login failed: {err}")
         except IstaConnectionError as err:
             print(f"Connection error: {err}")
