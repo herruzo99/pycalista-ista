@@ -27,9 +27,7 @@ _DATE_RE: Final = re.compile(r"^\d{2}/\d{2}/\d{4}$")
 # Amount pattern: digits with optional comma/dot decimal and optional € symbol
 _AMOUNT_RE: Final = re.compile(r"^[\d]+[.,][\d]+\s*€?$")
 # Period range pattern: "dd/mm/yyyy-dd/mm/yyyy" or "dd/mm/yyyy - dd/mm/yyyy"
-_PERIOD_RE: Final = re.compile(
-    r"(\d{2}/\d{2}/\d{4})\s*[-–]\s*(\d{2}/\d{2}/\d{4})"
-)
+_PERIOD_RE: Final = re.compile(r"(\d{2}/\d{2}/\d{4})\s*[-–]\s*(\d{2}/\d{2}/\d{4})")
 
 
 class InvoiceParser:
@@ -104,9 +102,7 @@ class InvoiceParser:
             Invoice with as many fields populated as could be parsed.
         """
         cells = [td.get_text(strip=True) for td in row.find_all("td")]
-        _LOGGER.debug(
-            "Row cells for invoice_id=%s: %s", invoice_id, cells
-        )
+        _LOGGER.debug("Row cells for invoice_id=%s: %s", invoice_id, cells)
 
         invoice_date: date | None = None
         amount: float | None = None
@@ -129,21 +125,24 @@ class InvoiceParser:
             # Amount: "80,12" or "80,12 €"
             if amount is None and _AMOUNT_RE.match(cell):
                 try:
-                    amount = float(
-                        cell.replace("€", "").replace(",", ".").strip()
-                    )
+                    amount = float(cell.replace("€", "").replace(",", ".").strip())
                 except ValueError:
                     _LOGGER.warning("Could not parse amount cell: '%s'", cell)
                 continue
 
             # Device type label (anything else that is not a date or amount)
-            if device_type is None and not _DATE_RE.match(cell) and not _AMOUNT_RE.match(cell):
+            if (
+                device_type is None
+                and not _DATE_RE.match(cell)
+                and not _AMOUNT_RE.match(cell)
+            ):
                 device_type = cell
 
         if amount is None:
             _LOGGER.warning(
                 "Could not extract amount for idRecibo=%s. Cells: %s",
-                invoice_id, cells,
+                invoice_id,
+                cells,
             )
 
         return Invoice(

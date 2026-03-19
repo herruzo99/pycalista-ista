@@ -11,6 +11,7 @@ import asyncio
 import io
 import logging
 from datetime import date, timedelta
+from html.parser import HTMLParser
 from typing import Any, Final
 from urllib.parse import quote
 
@@ -18,7 +19,21 @@ import aiohttp
 from aiohttp import ClientError, ClientResponseError, ClientSession
 from yarl import URL
 
-from .const import CONSUMPTION_URL, DATA_URL, DATE_FORMAT, INVOICE_PDF_URL, INVOICE_XLS_FALLBACK_URL, INVOICES_URL, LOGIN_URL, LOGOUT_URL, USER_AGENT
+from .const import (
+    CONSUMPTION_URL,
+    DATA_URL,
+    DATE_FORMAT,
+    INVOICE_PDF_URL,
+    INVOICE_XLS_FALLBACK_URL,
+    INVOICES_URL,
+    KC_AUTH_URL,
+    KC_CLIENT_ID,
+    KC_REDIRECT_URI,
+    KC_STATE,
+    LOGOUT_URL,
+    USER_AGENT,
+)
+from .consumption_parser import ConsumptionParser
 from .excel_parser import ExcelParser
 from .exception_classes import (
     IstaApiError,
@@ -26,7 +41,6 @@ from .exception_classes import (
     IstaLoginError,
     IstaParserError,
 )
-from .consumption_parser import ConsumptionParser
 from .invoice_parser import InvoiceParser
 from .invoice_xls_parser import InvoiceXlsParser
 from .models import Device
@@ -73,6 +87,7 @@ class VirtualApi:
         self.username: str = username
         self.password: str = password
         self._close_session: bool = session is None
+
         self.session: ClientSession = session or aiohttp.ClientSession(
             headers={"User-Agent": USER_AGENT},
             timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
@@ -87,8 +102,21 @@ class VirtualApi:
     async def __aenter__(self) -> "VirtualApi":
         return self
 
-    async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+    async def __aexit__(
+        self, exc_type: object, exc_val: object, exc_tb: object
+    ) -> None:
         await self.close()
+
+    def _strip_quoted_cookies(self) -> None:
+        """Strip quotes from cookies in the jar.
+
+        Keycloak session cookies (like KC_AUTH_SESSION_HASH) sometimes arrive with
+        literal quotes. aiohttp might send them back quoted, which is rejected by
+        Keycloak. This method ensures all cookies in the jar are unquoted.
+        """
+        for cookie in self.session.cookie_jar:
+            if cookie.value.startswith('"') and cookie.value.endswith('"'):
+                cookie.set(cookie.key, cookie.value[1:-1], cookie.value[1:-1])
 
     async def _send_request(
         self,
@@ -114,11 +142,12 @@ class VirtualApi:
             IstaLoginError: If a request fails due to expired session after relogin attempt.
         """
         _LOGGER.debug(
-            "Sending request: Method=%s, URL=%s, Retries left=%d, Params/Data=%s",
+            "Sending request: Method=%s, URL=%s, Retries left=%d, Params/Data=%s, Cookies=%s",
             method,
             url,
             retry_attempts,
             kwargs.get("params") or kwargs.get("data"),
+            self.session.cookie_jar.filter_cookies(URL(url)),
         )
 
         if self.session is None or self.session.closed:
@@ -146,31 +175,34 @@ class VirtualApi:
                 response_text_snippet,
             )
 
-            # Check for potential session expiry/redirect to login page
-            # This check might need adjustment based on actual redirect behavior
+            # Check for potential session expiry:
+            #  - The final URL lands on login.ista.com (cross-domain redirect
+            #    followed automatically by aiohttp).
+            session_expired = False
             if response.status == 200:
-                if (
-                    "GestionOficinaVirtual.do" in response_text
-                    and 'type="password"' in response_text
-                    and relogin
-                ):  # Check if it looks like the login page
-                    _LOGGER.info(
-                        "Request to %s returned a login page. Session may have expired. Attempting relogin.",
-                        url,
+                final_host = str(response.url.host)
+                if final_host == URL(KC_AUTH_URL).host:
+                    # We landed on the Keycloak login page – session expired.
+                    session_expired = True
+
+            if session_expired and relogin:
+                _LOGGER.info(
+                    "Request to %s returned a login page. Session may have expired. Attempting relogin.",
+                    url,
+                )
+                if await self.relogin():  # Attempt relogin
+                    # Retry through _send_request with relogin disabled to prevent
+                    # infinite recursion while still getting full response validation.
+                    _LOGGER.debug(
+                        "Relogin successful, retrying original request to %s", url
                     )
-                    if await self.relogin():  # Attempt relogin
-                        # Retry through _send_request with relogin disabled to prevent
-                        # infinite recursion while still getting full response validation.
-                        _LOGGER.debug(
-                            "Relogin successful, retrying original request to %s", url
-                        )
-                        return await self._send_request(
-                            method, url, retry_attempts, relogin=False, **kwargs
-                        )
-                    else:
-                        # Relogin failed, raise specific error
-                        _LOGGER.error("Relogin failed. Unable to complete request.")
-                        raise IstaLoginError("Relogin failed, cannot complete request.")
+                    return await self._send_request(
+                        method, url, retry_attempts, relogin=False, **kwargs
+                    )
+                else:
+                    # Relogin failed, raise specific error
+                    _LOGGER.error("Relogin failed. Unable to complete request.")
+                    raise IstaLoginError("Relogin failed, cannot complete request.")
 
             # Raise exception for non-success status codes after potential relogin
             response.raise_for_status()
@@ -200,8 +232,29 @@ class VirtualApi:
                 f"Request failed: {err.status} {err.message}"
             ) from err
         except (ClientError, asyncio.TimeoutError) as err:
+            # Special case: catch DNS errors for internal ISTA hosts.
+            # The portal incorrectly redirects to internal hostnames (e.g. gescon.ista.net)
+            # when the session expires, causing a ClientConnectorDNSError.
+            if relogin and "gescon.ista.net" in str(err):
+                _LOGGER.warning(
+                    "Detected redirect to internal ISTA host (session likely expired). Attempting relogin."
+                )
+                try:
+                    await self.relogin()
+                    # Retry the original request after relogin
+                    return await self._send_request(
+                        method, url, retry_attempts, relogin=False, **kwargs
+                    )
+                except Exception as relogin_err:
+                    _LOGGER.error(
+                        "Relogin failed after internal host redirect: %s", relogin_err
+                    )
+                    raise IstaLoginError(
+                        f"Session expired and relogin failed: {relogin_err}"
+                    ) from relogin_err
+
             if retry_attempts > 0:
-                wait_time = RETRY_BACKOFF * (MAX_RETRIES - retry_attempts + 1)
+                wait_time = (MAX_RETRIES - retry_attempts + 1) * 2
                 _LOGGER.warning(
                     "Request failed with %s, retrying in %ds... (%d attempts left)",
                     type(err).__name__,
@@ -212,7 +265,6 @@ class VirtualApi:
                 return await self._send_request(
                     method, url, retry_attempts - 1, relogin=relogin, **kwargs
                 )
-
             _LOGGER.error(
                 "Request to %s failed after all retries due to %s: %s",
                 url,
@@ -232,8 +284,212 @@ class VirtualApi:
         # self.session.cookie_jar.clear_domain('oficina.ista.es') # Example if needed
         return await self.login()
 
+    @staticmethod
+    def _parse_kc_form_action(html: str) -> tuple[str | None, dict[str, str]]:
+        """Extract the Keycloak login form ``action`` URL from HTML.
+
+        Keycloak renders a standard HTML ``<form method="post" action="...">``
+        that contains a one-time ``session_code``, ``execution``, and
+        ``client_data`` embedded in the action URL.  We must POST credentials
+        to that exact URL so Keycloak can tie the submission to the pending
+        auth session.
+
+        Args:
+            html: Raw HTML of the Keycloak login page.
+
+        Returns:
+            A tuple of (action_url, form_inputs). action_url is None if no
+            <form> with method="post" is found.
+        """
+
+        class _FormActionParser(HTMLParser):
+            def __init__(self) -> None:
+                super().__init__()
+                self.action: str | None = None
+                self.inputs: dict[str, str] = {}
+                self._current_tag: str | None = None
+                self._current_name: str | None = None
+
+            def handle_starttag(
+                self, tag: str, attrs: list[tuple[str, str | None]]
+            ) -> None:
+                attr_dict = dict(attrs)
+                if tag == "form" and self.action is None:
+                    method = (attr_dict.get("method") or "").lower()
+                    if method == "post":
+                        self.action = attr_dict.get("action") or ""
+                elif tag in ("input", "button", "select"):
+                    name = attr_dict.get("name")
+                    value = attr_dict.get("value") or ""
+                    if name:
+                        self.inputs[name] = value
+                        self._current_tag = tag
+                        self._current_name = name
+
+            def handle_data(self, data: str) -> None:
+                # Some buttons use the label as the value if value is missing
+                if self._current_tag == "button" and self._current_name:
+                    if not self.inputs.get(self._current_name):
+                        self.inputs[self._current_name] = data.strip()
+
+            def handle_endtag(self, tag: str) -> None:
+                self._current_tag = None
+                self._current_name = None
+
+        parser = _FormActionParser()
+        parser.feed(html)
+        return parser.action, parser.inputs
+
+    async def _discover_kc_form(self) -> tuple[str, str, dict[str, str]]:
+        """Perform the Keycloak OIDC discovery step.
+
+        Sends a GET to the Keycloak authorization endpoint with the portal's
+        OAuth2 parameters.  Keycloak responds with a login HTML page whose
+        ``<form action="...">`` contains a session-scoped, one-time-use URL
+        (embedding ``session_code``, ``execution``, ``client_data``, etc.).
+
+        Returns:
+            A tuple of (referer_url, action_url, form_inputs).
+
+        Raises:
+            IstaLoginError: If the response is not 200 or the form action
+                cannot be extracted from the HTML.
+            IstaConnectionError: If the network request fails.
+        """
+        params = {
+            "client_id": KC_CLIENT_ID,
+            "response_type": "code",
+            "scope": "openid",
+            "redirect_uri": KC_REDIRECT_URI,
+            "state": KC_STATE,
+            "prompt": "login",
+            "max_age": "0",
+        }
+        _LOGGER.debug("Discovering Keycloak login form from %s", KC_AUTH_URL)
+        headers = {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "es,en;q=0.5",
+        }
+        response = await self._send_request(
+            "GET", KC_AUTH_URL, params=params, relogin=False, headers=headers
+        )
+        self._strip_quoted_cookies()
+        if response.status != 200:
+            raise IstaLoginError(
+                f"Keycloak discovery returned unexpected status {response.status}"
+            )
+        html = await response.text()
+        action, inputs = self._parse_kc_form_action(html)
+        if not action:
+            raise IstaLoginError(
+                "Could not find Keycloak login form action URL in discovery response"
+            )
+        _LOGGER.debug(
+            "Keycloak form action URL discovered: %s (Inputs: %s)", action, inputs
+        )
+        return str(response.url), action, inputs
+
+    async def _submit_credentials(
+        self, referer_url: str, action_url: str, form_inputs: dict[str, str]
+    ) -> aiohttp.ClientResponse:
+        """POST credentials to the Keycloak login form endpoint.
+
+        Keycloak will validate the credentials and, on success, issue a 302
+        redirect to the portal's ``redirect_uri`` carrying an ``?code=…``
+        parameter.  ``aiohttp`` follows the full redirect chain automatically
+        (including cross-domain hops from ``acceso.ista.es`` → ``oficina.ista.es``)
+        so the returned response is the final response from
+        ``oficina.ista.es``.
+
+        On invalid credentials Keycloak returns 200 with an error page
+        (no redirect), which this method detects and converts to
+        ``IstaLoginError``.
+
+        Args:
+            action_url: The one-time form action URL obtained from
+                :meth:`_discover_kc_form`.
+
+        Returns:
+            The final ``aiohttp.ClientResponse`` after all redirects.
+
+        Raises:
+            IstaLoginError: If Keycloak rejects the credentials.
+            IstaConnectionError: If a network error occurs.
+        """
+        self._strip_quoted_cookies()
+
+        # Use credentials as provided, but keep all other form-discovered inputs.
+        # CRITICAL: Experience shows 'login' field should be empty even if button has a label.
+        data = {
+            **form_inputs,
+            "username": self.username,
+            "password": self.password,
+            "login": "",
+        }
+        _LOGGER.debug(
+            "Submitting credentials for %s with data: %s",
+            self.username,
+            list(data.keys()),
+        )
+        u = URL(action_url)
+        headers = {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "es,en;q=0.9",
+            "Cache-Control": "max-age=0",
+            "Referer": referer_url,
+            "Origin": f"{u.scheme}://{u.host}",
+        }
+        # allow_redirects=True so aiohttp follows all cross-domain hops
+        response = await self._send_request(
+            "POST",
+            action_url,
+            data=data,
+            relogin=False,
+            allow_redirects=True,
+            headers=headers,
+        )
+
+        # On bad credentials Keycloak returns 200 with an error page
+        # instead of redirecting.  Detect by final response host.
+        final_host = str(response.url.host)
+        kc_host = URL(KC_AUTH_URL).host
+        if final_host == kc_host:
+            try:
+                error_body = await response.text()
+                err_msg = self._extract_kc_error(error_body)
+
+                _LOGGER.error(
+                    "Login failed for %s: %s. Response snippet: %s",
+                    self.username,
+                    err_msg,
+                    error_body[:300].replace("\n", ""),
+                )
+                raise IstaLoginError(f"Login failed – {err_msg}")
+            except IstaLoginError:
+                raise
+            except Exception:
+                _LOGGER.exception(
+                    "Unexpected error parsing Keycloak failure for %s", self.username
+                )
+                raise IstaLoginError("Login failed – Keycloak rejected the credentials")
+
+        return response
+
     async def login(self) -> bool:
         """Authenticate with the Ista Calista virtual office asynchronously.
+
+        Implements the three-step Keycloak OAuth2 Authorization Code flow:
+
+        1. **Discover** – GET the Keycloak OIDC auth endpoint to obtain a
+           one-time login form action URL (step supplies ``session_code``,
+           ``execution``, ``client_data``, etc.).
+        2. **Submit** – POST credentials to that action URL.  Keycloak
+           issues a 302 that ``aiohttp`` follows through
+           ``acceso.ista.es/auth/callback/abonado`` → ``AuthHandler.do``
+           → ``GestionOficinaVirtual.do``, accumulating cookies along the
+           way so ``oficina.ista.es`` recognises the session.
+        3. **Preload** – GET the reading-metadata endpoint to finish
+           session initialisation.
 
         Uses a lock to prevent concurrent login attempts.
 
@@ -241,45 +497,26 @@ class VirtualApi:
             True if login was successful.
 
         Raises:
-            IstaLoginError: If authentication fails (e.g. bad credentials, 302 redirect).
-            IstaConnectionError: If the network request fails.
+            IstaLoginError: If Keycloak rejects the credentials or the
+                flow cannot be completed.
+            IstaConnectionError: If a network request fails.
         """
         async with self._login_lock:
-            _LOGGER.info("Attempting to log in user: %s", self.username)
-            data = {
-                "metodo": "loginAbonado",
-                "loginName": self.username,
-                "password": self.password,
-            }
-
+            _LOGGER.info("Attempting Keycloak OAuth2 login for user: %s", self.username)
             try:
-                response = await self._send_request(
-                    "POST", LOGIN_URL, data=data, relogin=False, allow_redirects=False
-                )
+                # Step 1 – obtain one-time form action URL and hidden inputs from Keycloak.
+                referer_url, action_url, form_inputs = await self._discover_kc_form()
 
-                if response.status == 302:
-                    _LOGGER.error(
-                        "Login failed for %s. Server returned 302 Redirect.",
-                        self.username,
-                    )
-                    raise IstaLoginError(
-                        "Login failed - invalid credentials (302 Redirect)"
-                    )
+                # Step 2 – submit credentials; follow full redirect chain.
+                await self._submit_credentials(referer_url, action_url, form_inputs)
 
-                if response.status == 200:
-                    _LOGGER.info("Login successful for %s (Status 200).", self.username)
-                    # Preload metadata needed for data downloads
-                    await self._preload_reading_metadata()
-                    return True
-
-                # _send_request already called raise_for_status(), so any non-2xx would
-                # have been raised as IstaConnectionError. We only reach here for unexpected
-                # 2xx statuses other than 200 (e.g. 201). Treat as success.
-                _LOGGER.warning(
-                    "Login for %s returned unexpected 2xx status %d. Treating as success.",
+                _LOGGER.info(
+                    "Keycloak login successful for %s; session established.",
                     self.username,
-                    response.status,
                 )
+
+                # Step 3 – preload metadata required for later data requests.
+                await self._preload_reading_metadata()
                 return True
 
             except IstaConnectionError as err:
@@ -625,7 +862,9 @@ class VirtualApi:
             _LOGGER.exception("An unexpected error occurred in get_devices_history.")
             raise
 
-    def merge_device_histories(self, device_lists: list[dict[str, Device]]) -> dict[str, Device]:
+    def merge_device_histories(
+        self, device_lists: list[dict[str, Device]]
+    ) -> dict[str, Device]:
         """Merge device histories from multiple time periods.
 
         This method combines historical readings from different time periods
@@ -982,7 +1221,7 @@ class VirtualApi:
         """
         import re
 
-        from bs4 import BeautifulSoup
+        from bs4 import BeautifulSoup, Tag
 
         soup = BeautifulSoup(html, "html.parser")
 
@@ -992,16 +1231,18 @@ class VirtualApi:
             return re.sub(r"(d-\d+-e)=\d+", r"\1=2", href)
 
         for link in soup.find_all("a", href=re.compile(r"6578706f7274")):
-            href = link.get("href", "")
-            if href and (url_fragment is None or url_fragment in href):
-                return _to_absolute(href)
+            if isinstance(link, Tag):
+                href = link.get("href", "")
+                if href and (url_fragment is None or url_fragment in href):
+                    return _to_absolute(str(href))
 
         # Fallback: any display-tag export link (only when no fragment filter)
         if url_fragment is None:
             for link in soup.find_all("a", href=re.compile(r"d-\d+-e=\d+")):
-                href = link.get("href", "")
-                if href:
-                    return _to_absolute(href)
+                if isinstance(link, Tag):
+                    href = link.get("href", "")
+                    if href:
+                        return _to_absolute(str(href))
 
         return None
 
@@ -1075,3 +1316,24 @@ class VirtualApi:
         _LOGGER.info("Successfully retrieved %d billed reading(s).", len(readings))
         return readings
 
+    @staticmethod
+    def _extract_kc_error(html: str) -> str:
+        """Extract a human-readable error from Keycloak's HTML response.
+
+        Searches for common Keycloak CSS classes and IDs used for error feedback.
+        """
+        import re
+
+        # Look for typical Keycloak error containers
+        indicators = [
+            r'class="kc-feedback-text">([^<]+)',
+            r'class="alert-error">[^<]*<span[^>]*>([^<]+)',
+            r'id="input-error-password">([^<]+)',
+            r'id="input-error-username">([^<]+)',
+            r'class="alert-error">([^<]+)',
+        ]
+        for pattern in indicators:
+            match = re.search(pattern, html, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        return "Unknown Keycloak error"

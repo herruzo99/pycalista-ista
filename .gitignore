@@ -71,3 +71,4 @@ output/
 .direnv
 
 my_example.sh
+my_verify_relogin.sh
