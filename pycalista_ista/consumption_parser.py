@@ -7,7 +7,6 @@ so parsing is straightforward.
 
 from __future__ import annotations
 
-import io
 import logging
 from datetime import datetime, timezone
 from typing import IO, Final
@@ -31,10 +30,16 @@ _COL_PREV = "lectura anterior"
 _COL_CURR = "lectura actual"
 _COL_CONSUMPTION = "consumo"
 
-_REQUIRED_COLS: Final[frozenset[str]] = frozenset({
-    _COL_SERIAL, _COL_TYPE, _COL_DATE,
-    _COL_PREV, _COL_CURR, _COL_CONSUMPTION,
-})
+_REQUIRED_COLS: Final[frozenset[str]] = frozenset(
+    {
+        _COL_SERIAL,
+        _COL_TYPE,
+        _COL_DATE,
+        _COL_PREV,
+        _COL_CURR,
+        _COL_CONSUMPTION,
+    }
+)
 
 
 class ConsumptionParser:
@@ -100,9 +105,11 @@ class ConsumptionParser:
             if pd.isna(date_val):
                 return None
             if isinstance(date_val, str):
-                reading_date = datetime.strptime(date_val.strip(), "%d/%m/%Y").replace(
-                    tzinfo=timezone.utc
-                ).date()
+                reading_date = (
+                    datetime.strptime(date_val.strip(), "%d/%m/%Y")
+                    .replace(tzinfo=timezone.utc)
+                    .date()
+                )
             else:
                 # pandas may parse it as a datetime already
                 reading_date = pd.Timestamp(date_val).date()
@@ -113,17 +120,23 @@ class ConsumptionParser:
             return BilledReading(
                 serial_number=serial,
                 device_type=str(row.get(_COL_TYPE, "")).strip(),
-                location=str(row.get(_COL_LOCATION, "")).strip()
-                if not pd.isna(row.get(_COL_LOCATION, ""))
-                else "",
+                location=(
+                    str(row.get(_COL_LOCATION, "")).strip()
+                    if not pd.isna(row.get(_COL_LOCATION, ""))
+                    else ""
+                ),
                 reading_id=reading_id,
                 date=reading_date,
-                incidence=str(row.get(_COL_INCIDENCE, "")).strip()
-                if not pd.isna(row.get(_COL_INCIDENCE, ""))
-                else "",
-                unit=str(row.get(_COL_UNIT, "")).strip()
-                if not pd.isna(row.get(_COL_UNIT, ""))
-                else "",
+                incidence=(
+                    str(row.get(_COL_INCIDENCE, "")).strip()
+                    if not pd.isna(row.get(_COL_INCIDENCE, ""))
+                    else ""
+                ),
+                unit=(
+                    str(row.get(_COL_UNIT, "")).strip()
+                    if not pd.isna(row.get(_COL_UNIT, ""))
+                    else ""
+                ),
                 previous_reading=float(row.get(_COL_PREV, 0) or 0),
                 current_reading=float(row.get(_COL_CURR, 0) or 0),
                 consumption=float(row.get(_COL_CONSUMPTION, 0) or 0),

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pycalista-ista"
-version = "0.8.0"
+version = "0.9.0"
 description = "Python library for the ista calista service"
 authors = [{name = "Juan Herruzo", email = "juan@herruzo.dev"}]
 license = {text = "MIT"}
@@ -86,7 +86,7 @@ exclude_lines = [
 
 [tool.black]
 line-length = 88
-target-version = ['py314']
+target-version = ['py313']
 include = '\.pyi?$'
 
 [tool.isort]

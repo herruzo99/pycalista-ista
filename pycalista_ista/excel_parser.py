@@ -28,7 +28,10 @@ _LOGGER: Final = logging.getLogger(__name__)
 # Columns recognised as metadata: skipped during date-header processing and
 # excluded from readings. Add new API columns here as they appear.
 EXPECTED_METADATA_COLUMNS: Final[set[str]] = {
-    "tipo", "n_serie", "ubicacion", "unidad_medida"
+    "tipo",
+    "n_serie",
+    "ubicacion",
+    "unidad_medida",
 }
 # Subset that must actually be present for the parser to produce output.
 REQUIRED_METADATA_COLUMNS: Final[set[str]] = {"tipo", "n_serie", "ubicacion"}

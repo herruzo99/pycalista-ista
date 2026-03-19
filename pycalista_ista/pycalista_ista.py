@@ -15,7 +15,7 @@ from aiohttp import ClientSession
 
 from .__version import __version__
 from .const import LOG_LEVEL_MAP
-from .exception_classes import IstaApiError, IstaConnectionError, IstaLoginError
+from .exception_classes import IstaApiError, IstaConnectionError, IstaLoginError, IstaParserError
 from .models import Device
 from .models.billed_reading import BilledReading
 from .models.invoice import Invoice
@@ -80,7 +80,9 @@ class PyCalistaIsta:
     async def __aenter__(self) -> "PyCalistaIsta":
         return self
 
-    async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+    async def __aexit__(
+        self, exc_type: object, exc_val: object, exc_tb: object
+    ) -> None:
         await self.close()
 
     def set_log_level(self, log_level: str) -> None:
@@ -349,7 +351,12 @@ class PyCalistaIsta:
                 self.account,
             )
             return readings
-        except (IstaLoginError, IstaConnectionError, IstaApiError, IstaParserError) as err:
+        except (
+            IstaLoginError,
+            IstaConnectionError,
+            IstaApiError,
+            IstaParserError,
+        ) as err:
             _LOGGER.error(
                 "Failed to get billed consumption for %s: %s", self.account, err
             )

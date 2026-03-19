@@ -6,7 +6,6 @@ The file has three columns: Fecha lectura, Tipo equipo, Importe.
 
 from __future__ import annotations
 
-import io
 import logging
 from datetime import datetime
 from typing import IO, Final
@@ -50,9 +49,7 @@ class InvoiceXlsParser:
             engine = "openpyxl" if magic[:2] == b"PK" else "xlrd"
             df = pd.read_excel(io_file, engine=engine)
         except Exception as err:
-            raise IstaParserError(
-                f"Failed to read invoice XLS file: {err}"
-            ) from err
+            raise IstaParserError(f"Failed to read invoice XLS file: {err}") from err
 
         df.columns = [str(c).strip().lower() for c in df.columns]
 
@@ -73,9 +70,7 @@ class InvoiceXlsParser:
             else:
                 invoices.append(invoice)
 
-        _LOGGER.info(
-            "Parsed %d invoice XLS rows (%d skipped).", len(invoices), skipped
-        )
+        _LOGGER.info("Parsed %d invoice XLS rows (%d skipped).", len(invoices), skipped)
         return invoices
 
     def _parse_row(self, row: pd.Series) -> Invoice | None:
@@ -97,9 +92,7 @@ class InvoiceXlsParser:
 
             device_type_raw = row.get(_COL_TYPE, "")
             device_type = (
-                str(device_type_raw).strip()
-                if not pd.isna(device_type_raw)
-                else None
+                str(device_type_raw).strip() if not pd.isna(device_type_raw) else None
             )
 
             return Invoice(

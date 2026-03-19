@@ -1,5 +1,6 @@
 """Tests for Async VirtualApi."""
 
+import re
 from datetime import date, datetime
 from io import BytesIO
 
@@ -7,7 +8,7 @@ import pytest
 from aiohttp import ClientConnectionError
 from aioresponses import aioresponses
 
-from pycalista_ista.const import DATA_URL, LOGIN_URL, LOGOUT_URL
+from pycalista_ista.const import DATA_URL, KC_AUTH_URL, LOGOUT_URL
 from pycalista_ista.exception_classes import (
     IstaConnectionError,
     IstaLoginError,
@@ -16,6 +17,7 @@ from pycalista_ista.exception_classes import (
 from pycalista_ista.models import HeatingDevice
 from pycalista_ista.virtual_api import VirtualApi
 from tests.conftest import (  # Import async fixtures and helpers
+    MOCK_KC_ACTION_URL,
     TEST_EMAIL,
     TEST_PASSWORD,
     mock_get_readings,
@@ -46,26 +48,19 @@ async def test_login_success(ista_api_client: VirtualApi, mock_responses: aiores
 
 
 async def test_login_failure(ista_api_client: VirtualApi, mock_responses: aioresponses):
-    """Test async login failure (invalid credentials - 302 Redirect)."""
-    # Mock 302 redirect which now indicates failure
-    mock_responses.post(
-        "https://oficina.ista.es/GesCon/GestionOficinaVirtual.do",
-        status=302,
-        headers={"Location": "some_redirect_url"},
-    )
-    with pytest.raises(
-        IstaLoginError, match=r"Login failed - invalid credentials \(302 Redirect\)"
-    ):
+    """Test async login failure (bad credentials – Keycloak keeps the user on the login page)."""
+    mock_login_failure(mock_responses)
+    with pytest.raises(IstaLoginError, match=r"Invalid username or password"):
         await ista_api_client.login()
 
 
 async def test_login_connection_error(
     ista_api_client: VirtualApi, mock_responses: aioresponses
 ):
-    """Test login failure due to connection error."""
-    # Simulate connection error by mocking a failure
-    mock_responses.post(
-        "https://oficina.ista.es/GesCon/GestionOficinaVirtual.do",
+    """Test login failure due to connection error on the KC discovery step."""
+    # Simulate connection error on the initial Keycloak discovery GET
+    mock_responses.get(
+        KC_AUTH_URL,
         exception=ClientConnectionError("Connection refused"),
     )
     # The error message now reflects that retries were attempted.
@@ -385,7 +380,7 @@ async def test_send_request_closed_session_raises():
     await client.close()
 
     with pytest.raises(IstaConnectionError, match="Session is closed"):
-        await client._send_request("GET", LOGIN_URL)
+        await client._send_request("GET", KC_AUTH_URL)
 
 
 async def test_send_request_retries_on_503_then_succeeds(
@@ -449,7 +444,13 @@ async def test_login_unexpected_exception_propagates(
     """An unexpected exception inside login() propagates after logging."""
     from unittest.mock import AsyncMock, patch
 
-    mock_responses.post(LOGIN_URL, status=200, body=b"")
+    # Discovery step succeeds
+    mock_responses.get(
+        re.compile(re.escape(KC_AUTH_URL) + r".*"),
+        status=200,
+        headers={"Content-Type": "text/html;charset=utf-8"},
+        body=b'<html><form method="post" action="https://login.ista.com/auth"></form></html>',
+    )
 
     with patch.object(
         ista_api_client,
@@ -457,8 +458,13 @@ async def test_login_unexpected_exception_propagates(
         new_callable=AsyncMock,
         side_effect=RuntimeError("surprise"),
     ):
-        with pytest.raises(RuntimeError, match="surprise"):
-            await ista_api_client.login()
+        with patch.object(
+            ista_api_client,
+            "_submit_credentials",
+            new_callable=AsyncMock,
+        ):
+            with pytest.raises(RuntimeError, match="surprise"):
+                await ista_api_client.login()
 
 
 async def test_login_preload_metadata_failure(
@@ -467,17 +473,28 @@ async def test_login_preload_metadata_failure(
     """If the metadata preload after login fails, IstaConnectionError propagates."""
     from unittest.mock import AsyncMock, patch
 
-    # Login POST succeeds
-    mock_responses.post(LOGIN_URL, status=200, body=b"")
-    # Metadata preload GET fails
-    mock_responses.get(
-        f"{DATA_URL}?metodo=preCargaLecturasRadio",
-        status=500,
-    )
+    with patch.object(
+        ista_api_client,
+        "_discover_kc_form",
+        new_callable=AsyncMock,
+        return_value=(KC_AUTH_URL, MOCK_KC_ACTION_URL, {}),
+    ):
+        with patch.object(
+            ista_api_client,
+            "_submit_credentials",
+            new_callable=AsyncMock,
+        ):
+            # Metadata preload GET fails
+            mock_responses.get(
+                re.compile(re.escape(f"{DATA_URL}") + r".*preCargaLecturasRadio.*"),
+                status=500,
+            )
 
-    with patch("pycalista_ista.virtual_api.asyncio.sleep", new_callable=AsyncMock):
-        with pytest.raises(IstaConnectionError):
-            await ista_api_client.login()
+            with patch(
+                "pycalista_ista.virtual_api.asyncio.sleep", new_callable=AsyncMock
+            ):
+                with pytest.raises(IstaConnectionError):
+                    await ista_api_client.login()
 
 
 # ---------------------------------------------------------------------------
@@ -610,9 +627,7 @@ async def test_interpolate_identical_timestamps_skips_gracefully(
 
 def test_find_export_url_returns_absolute_xls():
     """Relative export href is made absolute and forced to XLS format (e=2)."""
-    html = (
-        '<a href="GesCon/GestionLecturas.do?d-999-e=1&6578706f7274=1">Export</a>'
-    )
+    html = '<a href="GesCon/GestionLecturas.do?d-999-e=1&6578706f7274=1">Export</a>'
     url = VirtualApi._find_export_url(html)
     assert url is not None
     assert url.startswith("https://oficina.ista.es/")
@@ -651,6 +666,7 @@ def test_find_export_url_fragment_no_match_returns_none():
 def _make_invoice_xls_bytes() -> bytes:
     """Return minimal invoice XLS bytes for mocking."""
     from io import BytesIO
+
     import xlwt
 
     wb = xlwt.Workbook()
@@ -671,7 +687,9 @@ async def test_get_invoice_xls_success_with_link_in_html(
     """get_invoice_xls() finds the export link in HTML and downloads the XLS."""
     from pycalista_ista.const import INVOICES_URL
 
-    export_path = "GesCon/GestionFacturacion.do?d-148657-e=1&metodo=listadoRecibos&6578706f7274=1"
+    export_path = (
+        "GesCon/GestionFacturacion.do?d-148657-e=1&metodo=listadoRecibos&6578706f7274=1"
+    )
     listing_html = f'<a href="{export_path}">Excel</a>'
 
     mock_responses.get(

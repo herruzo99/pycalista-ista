@@ -8,8 +8,8 @@ calculations.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -50,9 +50,7 @@ class Reading:
         # inside __post_init__ (before the instance is fully constructed).
         # Callers are encouraged to pass timezone-aware datetimes directly.
         if self.date.tzinfo is None:
-            object.__setattr__(
-                self, "date", self.date.replace(tzinfo=timezone.utc)
-            )
+            object.__setattr__(self, "date", self.date.replace(tzinfo=timezone.utc))
 
     def __sub__(self, other: Reading) -> float | None:
         """Calculate consumption between two readings.

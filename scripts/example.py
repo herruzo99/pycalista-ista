@@ -23,9 +23,9 @@ from datetime import date, timedelta
 
 import aiohttp
 
-from pycalista_ista import PyCalistaIsta, IstaConnectionError, IstaLoginError
+from pycalista_ista import IstaConnectionError, IstaLoginError, PyCalistaIsta
 from pycalista_ista.const import INCIDENCE_NAMES
-from pycalista_ista.models import HeatingDevice, HotWaterDevice, ColdWaterDevice
+from pycalista_ista.models import ColdWaterDevice, HeatingDevice, HotWaterDevice
 
 _DEVICE_ICONS = {
     HeatingDevice: "🔥",
@@ -155,9 +155,9 @@ async def main() -> int:
     print(inv_col.format("Date", "Type", "Amount", "ID"))
     print("-" * 80)
     for inv in invoices:
-        inv_date    = inv.invoice_date.isoformat() if inv.invoice_date else "N/A"
+        inv_date = inv.invoice_date.isoformat() if inv.invoice_date else "N/A"
         device_type = (inv.device_type or "N/A")[:37]
-        amount      = f"{inv.amount:.2f} €" if inv.amount is not None else "N/A"
+        amount = f"{inv.amount:.2f} €" if inv.amount is not None else "N/A"
         print(inv_col.format(inv_date, device_type, amount, inv.invoice_id))
 
     # ── Invoice XLS export ────────────────────────────────────────────────────
@@ -166,15 +166,19 @@ async def main() -> int:
     print(xls_col.format("Date", "Type", "Amount"))
     print("-" * 65)
     for inv in invoice_xls:
-        inv_date    = inv.invoice_date.isoformat() if inv.invoice_date else "N/A"
+        inv_date = inv.invoice_date.isoformat() if inv.invoice_date else "N/A"
         device_type = (inv.device_type or "N/A")[:37]
-        amount      = f"{inv.amount:.2f} €" if inv.amount is not None else "N/A"
+        amount = f"{inv.amount:.2f} €" if inv.amount is not None else "N/A"
         print(xls_col.format(inv_date, device_type, amount))
 
     # ── Billed consumption ───────────────────────────────────────────────────
     print()
     bc_col = "{:<12}  {:<12}  {:>12}  {:>12}  {:>12}  {:<6}  {}"
-    print(bc_col.format("Serial", "Date", "Previous", "Current", "Consumption", "Unit", "Incidence"))
+    print(
+        bc_col.format(
+            "Serial", "Date", "Previous", "Current", "Consumption", "Unit", "Incidence"
+        )
+    )
     print("-" * 80)
     # Show last reading per device
     seen: set[str] = set()
@@ -182,15 +186,17 @@ async def main() -> int:
         if r.serial_number not in seen:
             seen.add(r.serial_number)
             est = " (est.)" if r.is_estimated else ""
-            print(bc_col.format(
-                r.serial_number,
-                r.date.isoformat(),
-                f"{r.previous_reading:.3f}",
-                f"{r.current_reading:.3f}",
-                f"{r.consumption:.3f}",
-                r.unit,
-                r.incidence + est,
-            ))
+            print(
+                bc_col.format(
+                    r.serial_number,
+                    r.date.isoformat(),
+                    f"{r.previous_reading:.3f}",
+                    f"{r.current_reading:.3f}",
+                    f"{r.consumption:.3f}",
+                    r.unit,
+                    r.incidence + est,
+                )
+            )
 
     # ── Incidence code inventory (for mapping unknown codes) ─────────────────
     print()
@@ -199,6 +205,7 @@ async def main() -> int:
     print(inc_col.format("Code", "Count", "Name", "Example serial  (date)"))
     print("-" * 72)
     from collections import Counter
+
     inc_counter: Counter[str] = Counter()
     inc_example: dict[str, tuple[str, str]] = {}
     for r in billed:

@@ -77,9 +77,8 @@ async def main():
                 # Access full history if needed: device.history
 
             # Or get billed consumption (async)
-+           billed = await client.get_billed_consumption()
-+           print(f"Retrieved {len(billed)} billed readings.")
-+
+            billed = await client.get_billed_consumption()
+            print(f"Retrieved {len(billed)} billed readings.")
          except IstaLoginError as err:
             print(f"Login failed: {err}")
         except IstaConnectionError as err:
@@ -124,11 +123,11 @@ if __name__ == "__main__":
 The project uses `pytest` and `pytest-asyncio`.
 
 ```bash
-# Run all tests
-pytest
-
 # Run with coverage report
 pytest --cov=pycalista_ista
+
+# Run the example script
+python scripts/example.py
 
 # Run specific test file
 pytest tests/test_virtual_api.py

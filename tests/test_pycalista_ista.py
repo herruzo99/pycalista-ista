@@ -17,7 +17,6 @@ from tests.conftest import (
     mock_login_success,
 )
 
-
 # ---------------------------------------------------------------------------
 # Synchronous validation – these don't touch the network / event loop
 # ---------------------------------------------------------------------------
@@ -134,12 +133,10 @@ async def test_pycalista_login_success(
 async def test_pycalista_login_failure(
     ista_main_client: PyCalistaIsta, mock_responses: aioresponses
 ):
-    """login() raises IstaLoginError on HTTP 302."""
-    mock_responses.post(
-        "https://oficina.ista.es/GesCon/GestionOficinaVirtual.do",
-        status=302,
-        headers={"Location": "https://oficina.ista.es/login"},
-    )
+    """login() raises IstaLoginError on Keycloak rejection."""
+    from tests.conftest import mock_login_failure
+
+    mock_login_failure(mock_responses)
     with pytest.raises(IstaLoginError):
         await ista_main_client.login()
 
@@ -151,8 +148,10 @@ async def test_pycalista_login_connection_error(
     """login() raises IstaConnectionError on network failure."""
     from aiohttp import ClientConnectionError
 
-    mock_responses.post(
-        "https://oficina.ista.es/GesCon/GestionOficinaVirtual.do",
+    from pycalista_ista.const import KC_AUTH_URL
+
+    mock_responses.get(
+        KC_AUTH_URL,
         exception=ClientConnectionError("refused"),
     )
     with pytest.raises(IstaConnectionError):
@@ -181,13 +180,18 @@ async def test_pycalista_login_unexpected_exception_wrapped(
 ):
     """Unexpected exceptions from VirtualApi.login are wrapped in IstaApiError."""
     from unittest.mock import AsyncMock, patch
+
     from pycalista_ista.exception_classes import IstaApiError
 
     with patch.object(
-        ista_main_client._virtual_api, "login", new_callable=AsyncMock,
+        ista_main_client._virtual_api,
+        "login",
+        new_callable=AsyncMock,
         side_effect=RuntimeError("something went very wrong"),
     ):
-        with pytest.raises(IstaApiError, match="unexpected error occurred during login"):
+        with pytest.raises(
+            IstaApiError, match="unexpected error occurred during login"
+        ):
             await ista_main_client.login()
 
 
@@ -197,6 +201,7 @@ async def test_get_devices_history_unexpected_exception_wrapped(
 ):
     """Unexpected exceptions from VirtualApi.get_devices_history are wrapped in IstaApiError."""
     from unittest.mock import AsyncMock, patch
+
     from pycalista_ista.exception_classes import IstaApiError
 
     with patch.object(
@@ -205,7 +210,9 @@ async def test_get_devices_history_unexpected_exception_wrapped(
         new_callable=AsyncMock,
         side_effect=RuntimeError("unexpected boom"),
     ):
-        with pytest.raises(IstaApiError, match="unexpected error occurred while fetching"):
+        with pytest.raises(
+            IstaApiError, match="unexpected error occurred while fetching"
+        ):
             await ista_main_client.get_devices_history(
                 start=date(2025, 1, 1), end=date(2025, 1, 31)
             )

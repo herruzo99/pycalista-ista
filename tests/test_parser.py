@@ -46,7 +46,16 @@ def test_header_normalization():
 def test_assign_years_to_date_headers():
     """Test date header normalisation: dd/mm/yy -> dd/mm/yyyy."""
     parser = ExcelParser(BytesIO(b""), current_year=2026)
-    headers = ["tipo", "n_serie", "ubicacion", "unidad_medida", "15/01/26", "01/01/26", "15/12/25", "01/12/25"]
+    headers = [
+        "tipo",
+        "n_serie",
+        "ubicacion",
+        "unidad_medida",
+        "15/01/26",
+        "01/01/26",
+        "15/12/25",
+        "01/12/25",
+    ]
     processed = parser._assign_years_to_date_headers(headers)
     assert processed == [
         "tipo",
@@ -60,7 +69,10 @@ def test_assign_years_to_date_headers():
     ]
 
     # Metadata-only row passes through unchanged
-    assert parser._assign_years_to_date_headers(["tipo", "n_serie"]) == ["tipo", "n_serie"]
+    assert parser._assign_years_to_date_headers(["tipo", "n_serie"]) == [
+        "tipo",
+        "n_serie",
+    ]
 
     # Invalid date format raises
     with pytest.raises(IstaParserError, match="Unexpected header format: '15-01-2024'"):
@@ -170,8 +182,9 @@ def test_parser_non_string_headers_get_placeholder():
 
 def test_parser_empty_excel_returns_empty_dict():
     """A valid Excel file with no data rows returns an empty device dict."""
-    import xlwt
     from io import BytesIO
+
+    import xlwt
 
     wb = xlwt.Workbook()
     ws = wb.add_sheet("Sheet1")
@@ -280,14 +293,17 @@ def _make_invoice_xls(rows: list[tuple]) -> "BytesIO":
 
 def test_invoice_xls_parser_basic():
     """InvoiceXlsParser returns Invoice objects with correct fields."""
-    from pycalista_ista.invoice_xls_parser import InvoiceXlsParser
-    from pycalista_ista.models.invoice import Invoice
     from datetime import date
 
-    buf = _make_invoice_xls([
-        ("31/01/2026", "Radio Distribuidor de Costes de Calefacción", "80,12"),
-        ("30/01/2026", "Agua caliente", "17,33"),
-    ])
+    from pycalista_ista.invoice_xls_parser import InvoiceXlsParser
+    from pycalista_ista.models.invoice import Invoice
+
+    buf = _make_invoice_xls(
+        [
+            ("31/01/2026", "Radio Distribuidor de Costes de Calefacción", "80,12"),
+            ("30/01/2026", "Agua caliente", "17,33"),
+        ]
+    )
     invoices = InvoiceXlsParser().parse(buf)
 
     assert len(invoices) == 2
@@ -302,6 +318,7 @@ def test_invoice_xls_parser_basic():
 def test_invoice_xls_parser_missing_required_column():
     """IstaParserError is raised when a required column is absent."""
     import xlwt
+
     from pycalista_ista.invoice_xls_parser import InvoiceXlsParser
 
     wb = xlwt.Workbook()
@@ -320,10 +337,12 @@ def test_invoice_xls_parser_skips_bad_rows():
     """Rows with unparseable dates are silently skipped."""
     from pycalista_ista.invoice_xls_parser import InvoiceXlsParser
 
-    buf = _make_invoice_xls([
-        ("not-a-date", "Calefacción", "10,00"),
-        ("28/02/2025", "Calefacción", "50,00"),
-    ])
+    buf = _make_invoice_xls(
+        [
+            ("not-a-date", "Calefacción", "10,00"),
+            ("28/02/2025", "Calefacción", "50,00"),
+        ]
+    )
     invoices = InvoiceXlsParser().parse(buf)
     assert len(invoices) == 1
     assert invoices[0].amount == pytest.approx(50.0)
