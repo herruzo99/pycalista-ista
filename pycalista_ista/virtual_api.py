@@ -1199,7 +1199,10 @@ class VirtualApi:
 
         try:
             parser = InvoiceXlsParser()
-            invoices = parser.parse(io.BytesIO(xls_content))
+            loop = asyncio.get_running_loop()
+            invoices = await loop.run_in_executor(
+                None, parser.parse, io.BytesIO(xls_content)
+            )
         except IstaParserError:
             _LOGGER.error("Failed to parse invoice XLS.", exc_info=True)
             raise
