@@ -23,19 +23,31 @@ async def run_relogin_test():
     print(f"Account: {email}")
 
     async with PyCalistaIsta(email, password) as client:
-        # 1. Initial login
         print("\n[1] Attempting initial login...")
+        # Let's directly get KC HTML to see the doctype
+        from pycalista_ista.const import KC_AUTH_URL, KC_CLIENT_ID, KC_REDIRECT_URI, KC_STATE
+        params = {
+            "client_id": KC_CLIENT_ID,
+            "response_type": "code",
+            "scope": "openid",
+            "redirect_uri": KC_REDIRECT_URI,
+            "state": KC_STATE,
+            "prompt": "login",
+            "max_age": "0",
+        }
+        res = await client._virtual_api._send_request("GET", KC_AUTH_URL, params=params, relogin=False)
+        html = await res.text()
+        print("Keycloak doctype snippet:", html[:200])
+        
         await client.login()
         print("Initial login successful.")
 
         # 2. Simulate session expiry by clearing cookies
         print(
-            "\n[2] Simulating session expiry by clearing cookies for 'oficina.ista.es'..."
+            "\n[2] Simulating session expiry by clearing ALL cookies..."
         )
-        # We manually remove the portal session cookies
-        # Note: In a real browser, JSESSIONID is the main one.
-        client._virtual_api.session.cookie_jar.clear_domain("oficina.ista.es")
-        print("Cookies for 'oficina.ista.es' cleared.")
+        client._virtual_api.session.cookie_jar.clear()
+        print("All cookies cleared.")
 
         # 3. Request data
         print("\n[3] Attempting to fetch data with 'expired' session...")
