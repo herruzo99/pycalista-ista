@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1] - 2026-03-26
+
+### Fixed
+- **Relogin Robustness**: Improved re-authentication logic by explicitly clearing session-scoped Keycloak and portal cookies before login attempts. This prevents "Unknown Keycloak error" failures in long-lived client sessions (e.g., Home Assistant).
+
 ## [0.9.0] - 2026-03-19
 
 ### Added

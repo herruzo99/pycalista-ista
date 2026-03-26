@@ -280,8 +280,12 @@ class VirtualApi:
             True if login was successful, False otherwise.
         """
         _LOGGER.info("Attempting relogin for user %s", self.username)
-        # Clear cookies specific to this domain if needed, or rely on session handling
-        # self.session.cookie_jar.clear_domain('oficina.ista.es') # Example if needed
+        # Clear cookies specific to these domains to prevent stale session errors
+        # during the Keycloak OAuth2 flow in long-lived client sessions.
+        self.session.cookie_jar.clear_domain("oficina.ista.es")
+        self.session.cookie_jar.clear_domain("login.ista.com")
+        self.session.cookie_jar.clear_domain("acceso.ista.es")
+        
         return await self.login()
 
     @staticmethod
