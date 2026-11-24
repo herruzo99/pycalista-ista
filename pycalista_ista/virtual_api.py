@@ -195,14 +195,18 @@ class VirtualApi:
         self._login_lock = asyncio.Lock()  # Prevent concurrent login attempts
         # Per-client lock: property selection must not race on one cookie jar.
         self._account_lock = asyncio.Lock()
-        self._account_id: str | None = account_id
+        # Property to restore after every authentication (configured or last
+        # selected). None means "keep the portal default property".
+        self._requested_account_id: str | None = account_id
+        # Verified selected property. Set only after the portal confirms it.
+        self._account_id: str | None = None
         # True while select_account() runs, to stop login() from recursing
         # into another selection after a relogin.
         self._selecting_account: bool = False
 
     @property
     def account_id(self) -> str | None:
-        """The opaque ID of the selected linked property, or None."""
+        """The verified opaque ID of the selected property, or None."""
         return self._account_id
 
     async def close(self) -> None:
@@ -658,8 +662,8 @@ class VirtualApi:
         # Step 4 – restore the configured property selection. A login started
         # from inside select_account() (relogin) skips it: that caller verifies
         # the selection itself.
-        if self._account_id is not None and not self._selecting_account:
-            await self.select_account(self._account_id)
+        if self._requested_account_id is not None and not self._selecting_account:
+            await self.select_account(self._requested_account_id)
 
         return True
 
@@ -813,6 +817,7 @@ class VirtualApi:
             )
 
         self._account_id = account_id
+        self._requested_account_id = account_id
         _LOGGER.info("Linked-property selection verified.")
 
     async def _get_readings_chunk(
