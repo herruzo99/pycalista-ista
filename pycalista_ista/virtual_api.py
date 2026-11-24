@@ -945,15 +945,17 @@ class VirtualApi:
                     response_text = await response.text()
                 except UnicodeDecodeError:
                     # If we can't decode it, it's likely binary (maybe the Excel file itself?)
-                    # even if the content-type header was wrong.
-                    # Let's log a snippet of the binary data for debugging.
+                    # even if the content-type header was wrong. Log only the
+                    # file signature as hex: the body may be a portal HTML page
+                    # in an unknown encoding, which can hold property data.
                     content_bytes = await response.read()
                     _LOGGER.error(
                         "Expected Excel file but received content type '%s'. "
                         "Could not decode response text (UnicodeDecodeError). "
-                        "First 100 bytes of response: %s",
+                        "Response signature (first 16 bytes, hex): %s, %d bytes",
                         content_type,
-                        content_bytes[:100],
+                        content_bytes[:16].hex(),
+                        len(content_bytes),
                     )
                     # Check for ZIP (xlsx) or OLE2 (xls) magic numbers
                     # PK.. = Zip/XLSX

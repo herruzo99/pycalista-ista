@@ -348,3 +348,37 @@ async def test_redact_pairs_masks_html_escaped_query_values():
     assert "CCC" not in masked
     assert masked.count(MASKED_VALUE) == 3
     assert _redact_sensitive_pairs("metodo=buscarRecibos") == "metodo=buscarRecibos"
+
+
+async def test_undecodable_readings_body_logs_no_property_data(
+    mock_aiohttp_session, mock_responses: aioresponses, caplog
+):
+    """An undecodable readings body logs only its hex signature.
+
+    The session-expired page can arrive in an encoding that the client cannot
+    decode. The bytes must not be logged as text, because they can hold the
+    property ID and label.
+    """
+    caplog.set_level(logging.DEBUG)
+    body = (
+        '<html><body><select name="idAbonado">'
+        f'<option value="{PROPERTY_ID}" selected>{PROPERTY_LABEL}</option>'
+        "</select>\xf1</body></html>"
+    ).encode("latin-1")
+    mock_responses.get(
+        READINGS_PATTERN,
+        status=200,
+        headers={"Content-Type": "text/html; charset=x-unknown-encoding"},
+        body=body,
+        repeat=True,
+    )
+    client = VirtualApi(
+        username=TEST_EMAIL, password=SECRET_PASSWORD, session=mock_aiohttp_session
+    )
+
+    with pytest.raises(IstaApiError):
+        await client.get_devices_history(date(2026, 2, 1), date(2026, 2, 2))
+
+    assert PROPERTY_ID.encode() not in caplog.text.encode()
+    assert PROPERTY_LABEL.encode() not in caplog.text.encode()
+    assert "Response signature (first 16 bytes, hex)" in caplog.text
