@@ -30,6 +30,14 @@ _COL_PREV = "lectura anterior"
 _COL_CURR = "lectura actual"
 _COL_CONSUMPTION = "consumo"
 
+# Around October 2026 the portal renamed two columns of the "Mis Consumos" export.
+# Each new name is mapped onto the canonical one, but only when the canonical name
+# is absent, so a file that still uses the old names, or carries both, keeps working.
+_ALIASED_COLS: Final[dict[str, str]] = {
+    "lectura anterior facturada": _COL_PREV,
+    "lectura facturada": _COL_CURR,
+}
+
 _REQUIRED_COLS: Final[frozenset[str]] = frozenset(
     {
         _COL_SERIAL,
@@ -72,6 +80,16 @@ class ConsumptionParser:
 
         # Normalise column names
         df.columns = [str(c).strip().lower() for c in df.columns]
+
+        present = set(df.columns)
+        aliases = {
+            alias: canonical
+            for alias, canonical in _ALIASED_COLS.items()
+            if alias in present and canonical not in present
+        }
+        if aliases:
+            _LOGGER.debug("Billed consumption columns renamed: %s", aliases)
+            df = df.rename(columns=aliases)
 
         missing = _REQUIRED_COLS - set(df.columns)
         if missing:
