@@ -156,6 +156,11 @@ async def test_redact_helpers_mask_sensitive_values():
     )
     assert _redact_url("https://h/x.do?metodo=a") == "https://h/x.do?metodo=a"
     assert _redact_url("mailto:x@example.com").startswith("mailto:")
+    assert _redact_mapping([("password", "p"), ("metodo", "a")]) == [
+        ("password", MASKED_VALUE),
+        ("metodo", "a"),
+    ]
+    assert _redact_mapping("raw string body") == MASKED_VALUE
     assert _redact_mapping(None) is None
     assert _redact_response_snippet("<html>hola</html>") == "<html>hola</html>"
     assert (
