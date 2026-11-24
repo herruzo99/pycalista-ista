@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.3] - 2026-11-24
+
+### Fixed
+- **Billed consumption after portal column rename**: around October 2026 the ista portal renamed the billed-consumption columns `lectura anterior` and `lectura actual` to `lectura anterior facturada` and `lectura facturada`, which made `ConsumptionParser` raise `IstaParserError: Billed consumption file missing required columns` and stopped the billed sensors from updating (ista-calista#4). Both spellings are now accepted; the new names are mapped onto the old ones only when the old ones are absent, so accounts that still receive the old export keep working.
+
+### Changed
+- **Version reporting**: `pycalista_ista.__version__` still reported 0.9.1 after the 0.9.2 release. It now matches the packaged version.
+
 ## [0.9.1] - 2026-03-26
 
 ### Fixed
