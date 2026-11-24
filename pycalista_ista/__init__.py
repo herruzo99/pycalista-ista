@@ -23,6 +23,7 @@ from .models import (
     HeatingDevice,
     HotWaterDevice,
     Invoice,
+    PortalAccount,
     Reading,
     WaterDevice,
 )
@@ -45,6 +46,8 @@ __all__ = [
     # Billing models
     "Invoice",
     "BilledReading",
+    # Linked-property model (EXPERIMENTAL multi-property support)
+    "PortalAccount",
     # Constants
     "INCIDENCE_NAMES",
     # Exceptions

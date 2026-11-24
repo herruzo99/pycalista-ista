@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.0] - 2026-11-24
+
+### Added
+- **Linked-property discovery and selection (EXPERIMENTAL)**: `PyCalistaIsta.list_accounts()` returns the properties linked to a login as `PortalAccount(account_id, label)` objects, and `PyCalistaIsta.select_account(account_id)` switches to one of them with the same request as the portal selector. The opaque IDs make sense only in the current session. Separator options are ignored and repeated IDs are deduplicated. An unknown ID raises `IstaApiError`, and the selection is verified on the read-only radio preload page before it is accepted.
+- **Property selection at login**: `PyCalistaIsta(email, password, session=None, account_id=...)` selects and verifies the property after authentication, including after an automatic relogin. `PyCalistaIsta.account_id` reports the selected ID.
+- **Experimental status**: multi-property support was validated with one live property only. An account with two or more linked properties is not yet validated against the live portal.
+- **Complete invoice pagination**: `get_invoices()` now follows the invoice-list paging anchors and returns the invoices of every page, deduplicated by `invoice_id`. It stops on a repeated page URL and reads at most 50 pages. `InvoiceParser.next_page_url(html, current_url)` exposes the paging logic.
+
+### Security
+- **Credential-safe DEBUG logging**: `DEBUG` logs no longer contain the login password, cookie values, or opaque property IDs. Request query strings, form bodies, Keycloak form inputs, and page snippets that contain the linked-property selector are masked. Only cookie names are logged.
+
 ## [0.9.3] - 2026-11-24
 
 ### Fixed

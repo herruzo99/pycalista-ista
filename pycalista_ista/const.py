@@ -28,6 +28,8 @@ VERSION: Final[str] = __version__
 # API Endpoints – virtual office (oficina.ista.es)
 BASE_URL: Final[str] = "https://oficina.ista.es/GesCon/"
 DATA_URL: Final[str] = BASE_URL + "GestionFincas.do"
+# Property (linked account) switch endpoint used by the portal selector
+ACCOUNT_SWITCH_URL: Final[str] = BASE_URL + "GestionOficinaVirtual.do"
 LOGOUT_URL: Final[str] = BASE_URL + "GestionOficinaVirtual.do?metodo=logOutAbonado"
 INVOICES_URL: Final[str] = BASE_URL + "GestionFacturacionBuscar.do"
 INVOICE_PDF_URL: Final[str] = BASE_URL + "GestionFacturacion.do"
@@ -38,6 +40,9 @@ INVOICE_XLS_FALLBACK_URL: Final[str] = (
     + "GestionFacturacion.do"
     + "?d-148657-e=2&metodo=listadoRecibos&metodo=buscarRecibos&6578706f7274=1"
 )
+
+# Maximum number of invoice HTML pages read by get_invoices()
+MAX_INVOICE_PAGES: Final[int] = 50
 
 # Keycloak / OAuth2 – login.ista.com
 KC_REALM_URL: Final[str] = "https://login.ista.com/realms/GESCON-PORTAL-ES-APP-Abonado"

@@ -9,6 +9,7 @@ different types of utility meters and their readings. The models include:
 - ColdWaterDevice: Cold water meter implementation
 - HeatingDevice: Heating meter implementation
 - Reading: Individual meter reading with timestamp
+- PortalAccount: Property linked to the authenticated login
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from .device import Device
 from .heating_device import HeatingDevice
 from .hot_water_device import HotWaterDevice
 from .invoice import Invoice
+from .portal_account import PortalAccount
 from .reading import Reading
 from .water_device import WaterDevice
 
@@ -30,5 +32,6 @@ __all__ = [
     "ColdWaterDevice",
     "HeatingDevice",
     "Invoice",
+    "PortalAccount",
     "Reading",
 ]

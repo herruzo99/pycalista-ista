@@ -19,6 +19,7 @@ from .exception_classes import IstaApiError, IstaConnectionError, IstaLoginError
 from .models import Device
 from .models.billed_reading import BilledReading
 from .models.invoice import Invoice
+from .models.portal_account import PortalAccount
 from .virtual_api import VirtualApi
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class PyCalistaIsta:
         email: str,
         password: str,
         session: ClientSession | None = None,
+        account_id: str | None = None,
     ) -> None:
         """Initialize the async client.
 
@@ -53,6 +55,9 @@ class PyCalistaIsta:
             password: Password for authentication.
             session: An optional external aiohttp ClientSession.
                      If None, VirtualApi creates and owns one internally.
+            account_id: Optional opaque ID of the linked property to use
+                     (EXPERIMENTAL). When set, every successful login and
+                     relogin selects and verifies that property.
 
         Raises:
             ValueError: If email or password is empty.
@@ -66,11 +71,18 @@ class PyCalistaIsta:
             username=self.account,
             password=self._password,
             session=session,  # Pass session to VirtualApi; it owns the lifecycle
+            account_id=account_id,
         )
         _LOGGER.debug(
-            "PyCalistaIsta client initialized for %s.",
+            "PyCalistaIsta client initialized for %s (property selection configured: %s).",
             self.account,
+            account_id is not None,
         )
+
+    @property
+    def account_id(self) -> str | None:
+        """The opaque ID of the selected linked property, or None."""
+        return self._virtual_api.account_id
 
     async def close(self) -> None:
         """Close the underlying API session if managed internally."""
@@ -154,6 +166,78 @@ class PyCalistaIsta:
                 f"An unexpected error occurred during login: {err}"
             ) from err
 
+    async def list_accounts(self) -> list[PortalAccount]:
+        """List the properties linked to this login.
+
+        EXPERIMENTAL: multi-property support is not yet validated against an
+        account with more than one linked property. Login must already have
+        happened. Separator options are ignored and repeated IDs are
+        deduplicated.
+
+        Returns:
+            List of PortalAccount objects in portal order.
+
+        Raises:
+            IstaLoginError: If not authenticated or session expired.
+            IstaConnectionError: If the request fails.
+            IstaApiError: For other unexpected errors.
+        """
+        _LOGGER.info("Requesting linked properties for %s.", self.account)
+        try:
+            accounts = await self._virtual_api.list_accounts()
+            _LOGGER.info(
+                "Discovered %d linked properties for %s.",
+                len(accounts),
+                self.account,
+            )
+            return accounts
+        except (IstaLoginError, IstaConnectionError, IstaApiError) as err:
+            _LOGGER.error(
+                "Failed to list linked properties for %s: %s", self.account, err
+            )
+            raise
+        except Exception as err:
+            _LOGGER.exception(
+                "An unexpected error occurred while listing linked properties for %s.",
+                self.account,
+            )
+            raise IstaApiError(
+                f"An unexpected error occurred while listing linked properties: {err}"
+            ) from err
+
+    async def select_account(self, account_id: str) -> None:
+        """Select one linked property and verify the portal applied it.
+
+        EXPERIMENTAL: multi-property support is not yet validated against an
+        account with more than one linked property.
+
+        Args:
+            account_id: Opaque property ID from :meth:`list_accounts`.
+
+        Raises:
+            IstaApiError: If the ID is not linked to this login, or if the
+                portal did not apply the selection.
+            IstaLoginError: If not authenticated or session expired.
+            IstaConnectionError: If the request fails.
+        """
+        _LOGGER.info("Requesting linked-property selection for %s.", self.account)
+        try:
+            await self._virtual_api.select_account(account_id)
+        except (IstaLoginError, IstaConnectionError, IstaApiError) as err:
+            _LOGGER.error(
+                "Failed to select a linked property for %s: %s", self.account, err
+            )
+            raise
+        except Exception as err:
+            _LOGGER.exception(
+                "An unexpected error occurred while selecting a linked property "
+                "for %s.",
+                self.account,
+            )
+            raise IstaApiError(
+                f"An unexpected error occurred while selecting a property: {err}"
+            ) from err
+
     async def get_devices_history(
         self,
         start: date | None = None,
@@ -217,6 +301,9 @@ class PyCalistaIsta:
 
     async def get_invoices(self) -> list[Invoice]:
         """Fetch the list of invoices from the portal.
+
+        Every invoice-list page is read and the results are deduplicated by
+        ``invoice_id``.
 
         Returns:
             List of Invoice objects with metadata. Call get_invoice_pdf() to

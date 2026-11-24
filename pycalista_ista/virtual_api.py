@@ -19,7 +19,9 @@ import aiohttp
 from aiohttp import ClientError, ClientResponseError, ClientSession
 from yarl import URL
 
+from .account_parser import AccountParser
 from .const import (
+    ACCOUNT_SWITCH_URL,
     CONSUMPTION_URL,
     DATA_URL,
     DATE_FORMAT,
@@ -31,6 +33,7 @@ from .const import (
     KC_REDIRECT_URI,
     KC_STATE,
     LOGOUT_URL,
+    MAX_INVOICE_PAGES,
     USER_AGENT,
 )
 from .consumption_parser import ConsumptionParser
@@ -46,6 +49,7 @@ from .invoice_xls_parser import InvoiceXlsParser
 from .models import Device
 from .models.billed_reading import BilledReading
 from .models.invoice import Invoice
+from .models.portal_account import PortalAccount
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +60,99 @@ RETRY_STATUS_CODES: Final = {408, 429, 502, 503, 504}
 MAX_DAYS_PER_REQUEST: Final = 240
 EXCEL_CONTENT_TYPE: Final = "application/vnd.ms-excel;charset=iso-8859-1"
 REQUEST_TIMEOUT: Final = 30  # seconds
+
+# Query and form keys whose values must never reach the logs.
+# password: credentials. idAbonado/param: opaque property ID. The rest are
+# one-time auth tokens of the Keycloak and portal redirects.
+SENSITIVE_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "password",
+        "passwd",
+        "pwd",
+        "idabonado",
+        "param",
+        "code",
+        "state",
+        "ticket",
+        "session_code",
+        "execution",
+        "tab_id",
+        "client_data",
+    }
+)
+MASKED_VALUE: Final[str] = "***(hidden)"
+# Marker of the linked-property selector inside a page body
+ACCOUNT_SELECT_MARKER: Final[str] = "idAbonado"
+
+
+def _mask_value(key: str, value: object) -> object:
+    """Return a loggable value for one query/form pair."""
+    if isinstance(key, str) and key.lower() in SENSITIVE_KEYS:
+        return MASKED_VALUE
+    return value
+
+
+def _redact_mapping(data: object) -> object:
+    """Return a copy of a query/form mapping with sensitive values masked."""
+    if data is None:
+        return None
+    if isinstance(data, dict):
+        return {key: _mask_value(key, value) for key, value in data.items()}
+    if isinstance(data, (list, tuple)):
+        try:
+            return [
+                (_mask_value(str(key), value),) + tuple(rest)
+                for key, *rest in data
+            ]
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            return MASKED_VALUE
+    return MASKED_VALUE
+
+
+def _redact_url(url: object) -> str:
+    """Return a URL string with sensitive query values masked."""
+    try:
+        parsed = URL(str(url))
+    except (TypeError, ValueError):
+        return "<unparsable url>"
+    if not parsed.query:
+        return str(parsed)
+    pairs = [
+        (key, MASKED_VALUE if key.lower() in SENSITIVE_KEYS else value)
+        for key, value in parsed.query.items()
+    ]
+    return str(parsed.with_query(pairs))
+
+
+def _cookie_names(session: ClientSession, url: object) -> list[str]:
+    """Return the sorted cookie names sent to a URL (never the values)."""
+    try:
+        filtered = session.cookie_jar.filter_cookies(URL(str(url)))
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return []
+    return sorted(cookie.key for cookie in filtered.values())
+
+
+def _redact_response_snippet(text: str) -> str:
+    """Return a short loggable response snippet without property data.
+
+    Any authenticated page carries the linked-property selector, whose
+    options hold opaque property IDs and labels. Such pages are not logged.
+    """
+    if ACCOUNT_SELECT_MARKER in text:
+        return "<page with linked-property selector omitted>"
+    return text[:250].replace("\n", "")
+
+
+def _normalize_page_url(url: object) -> str:
+    """Return a comparable form of a page URL (sorted query parameters)."""
+    try:
+        parsed = URL(str(url))
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return str(url)
+    if not parsed.query:
+        return str(parsed)
+    return str(parsed.with_query(sorted(parsed.query.items())))
 
 
 class VirtualApi:
@@ -75,6 +172,7 @@ class VirtualApi:
         username: str,
         password: str,
         session: ClientSession | None = None,
+        account_id: str | None = None,
     ) -> None:
         """Initialize the async API client.
 
@@ -83,6 +181,8 @@ class VirtualApi:
             password: The password for authentication.
             session: An optional external aiohttp ClientSession.
                      If None, a new session is created internally.
+            account_id: Optional opaque ID of the linked property to select
+                     after every successful authentication.
         """
         self.username: str = username
         self.password: str = password
@@ -93,6 +193,17 @@ class VirtualApi:
             timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
         )
         self._login_lock = asyncio.Lock()  # Prevent concurrent login attempts
+        # Per-client lock: property selection must not race on one cookie jar.
+        self._account_lock = asyncio.Lock()
+        self._account_id: str | None = account_id
+        # True while select_account() runs, to stop login() from recursing
+        # into another selection after a relogin.
+        self._selecting_account: bool = False
+
+    @property
+    def account_id(self) -> str | None:
+        """The opaque ID of the selected linked property, or None."""
+        return self._account_id
 
     async def close(self) -> None:
         """Close the underlying aiohttp session if created internally."""
@@ -144,10 +255,10 @@ class VirtualApi:
         _LOGGER.debug(
             "Sending request: Method=%s, URL=%s, Retries left=%d, Params/Data=%s, Cookies=%s",
             method,
-            url,
+            _redact_url(url),
             retry_attempts,
-            kwargs.get("params") or kwargs.get("data"),
-            self.session.cookie_jar.filter_cookies(URL(url)),
+            _redact_mapping(kwargs.get("params") or kwargs.get("data")),
+            _cookie_names(self.session, url),
         )
 
         if self.session is None or self.session.closed:
@@ -160,7 +271,7 @@ class VirtualApi:
             response_text: str = ""
             try:
                 response_text = await response.text()
-                response_text_snippet = response_text[:250].replace("\n", "")
+                response_text_snippet = _redact_response_snippet(response_text)
             except UnicodeDecodeError:
                 response_text_snippet = "<binary content>"
                 _LOGGER.debug(
@@ -389,7 +500,9 @@ class VirtualApi:
                 "Could not find Keycloak login form action URL in discovery response"
             )
         _LOGGER.debug(
-            "Keycloak form action URL discovered: %s (Inputs: %s)", action, inputs
+            "Keycloak form action URL discovered on host %s (Inputs: %s)",
+            URL(action).host,
+            sorted(inputs),
         )
         return str(response.url), action, inputs
 
@@ -494,8 +607,13 @@ class VirtualApi:
            way so ``oficina.ista.es`` recognises the session.
         3. **Preload** – GET the reading-metadata endpoint to finish
            session initialisation.
+        4. **Select property** – when an ``account_id`` was configured and
+           this login is not itself part of a selection, reselect and
+           verify that linked property.
 
-        Uses a lock to prevent concurrent login attempts.
+        Uses a per-client lock to prevent concurrent login attempts. The
+        property selection runs after that lock is released, so the login
+        lock and the account lock are never held at the same time.
 
         Returns:
             True if login was successful.
@@ -504,6 +622,8 @@ class VirtualApi:
             IstaLoginError: If Keycloak rejects the credentials or the
                 flow cannot be completed.
             IstaConnectionError: If a network request fails.
+            IstaApiError: If the configured property can no longer be
+                selected or verified.
         """
         async with self._login_lock:
             _LOGGER.info("Attempting Keycloak OAuth2 login for user: %s", self.username)
@@ -521,7 +641,6 @@ class VirtualApi:
 
                 # Step 3 – preload metadata required for later data requests.
                 await self._preload_reading_metadata()
-                return True
 
             except IstaConnectionError as err:
                 _LOGGER.error(
@@ -536,6 +655,14 @@ class VirtualApi:
                 )
                 raise
 
+        # Step 4 – restore the configured property selection. A login started
+        # from inside select_account() (relogin) skips it: that caller verifies
+        # the selection itself.
+        if self._account_id is not None and not self._selecting_account:
+            await self.select_account(self._account_id)
+
+        return True
+
     async def logout(self) -> None:
         """Log out from the Ista Calista virtual office asynchronously."""
         _LOGGER.info("Logging out user: %s", self.username)
@@ -548,6 +675,31 @@ class VirtualApi:
             _LOGGER.warning("Logout failed for %s: %s", self.username, err)
             # We don't raise here as logout failure shouldn't block the main process result
 
+    async def _fetch_radio_preload(self) -> str:
+        """GET the read-only radio preload page and return its HTML.
+
+        The page lists the linked properties and marks the selected one, so
+        it is the discovery and verification page for property selection.
+
+        Returns:
+            Raw HTML of the preload page.
+
+        Raises:
+            IstaConnectionError: If the request fails.
+            IstaLoginError: If session expired and relogin failed.
+        """
+        _LOGGER.debug("Fetching radio preload page.")
+        params = {"metodo": "preCargaLecturasRadio"}
+        try:
+            response = await self._send_request("GET", DATA_URL, params=params)
+            return await response.text()
+        except (IstaConnectionError, IstaLoginError) as err:
+            _LOGGER.error("Failed to fetch the radio preload page: %s", err)
+            raise
+        except Exception:
+            _LOGGER.exception("An unexpected error occurred while preloading metadata.")
+            raise
+
     async def _preload_reading_metadata(self) -> None:
         """Preload reading metadata required for subsequent requests (async).
 
@@ -556,16 +708,112 @@ class VirtualApi:
             IstaLoginError: If session expired and relogin failed.
         """
         _LOGGER.debug("Preloading reading metadata for Excel export.")
-        params = {"metodo": "preCargaLecturasRadio"}
-        try:
-            await self._send_request("GET", DATA_URL, params=params)
-            _LOGGER.debug("Successfully preloaded reading metadata.")
-        except (IstaConnectionError, IstaLoginError) as err:
-            _LOGGER.error("Failed to preload reading metadata: %s", err)
-            raise
-        except Exception:
-            _LOGGER.exception("An unexpected error occurred while preloading metadata.")
-            raise
+        await self._fetch_radio_preload()
+        _LOGGER.debug("Successfully preloaded reading metadata.")
+
+    async def list_accounts(self) -> list[PortalAccount]:
+        """List the properties linked to the authenticated login.
+
+        Uses only the read-only radio preload page. Login must already have
+        happened. Separator options are ignored and repeated IDs are
+        deduplicated.
+
+        EXPERIMENTAL: multi-property support is not yet validated against an
+        account with more than one linked property.
+
+        Returns:
+            List of PortalAccount objects in portal order. Empty if the page
+            has no linked-property selector.
+
+        Raises:
+            IstaConnectionError: If the request fails.
+            IstaLoginError: If the session expired and relogin failed.
+        """
+        html = await self._fetch_radio_preload()
+        accounts = AccountParser().parse_accounts(html)
+        _LOGGER.info("Discovered %d linked properties.", len(accounts))
+        return accounts
+
+    async def select_account(self, account_id: str) -> None:
+        """Select one linked property and verify the portal applied it.
+
+        Sends the same request as the portal selector: a POST to
+        ``GestionOficinaVirtual.do`` with ``metodo=cambioAbonado`` and the
+        opaque property ID, followed by a GET of the radio preload page to
+        verify the selected option.
+
+        EXPERIMENTAL: multi-property support is not yet validated against an
+        account with more than one linked property.
+
+        Args:
+            account_id: Opaque property ID from :meth:`list_accounts`.
+
+        Raises:
+            IstaApiError: If the ID is not linked to this login, or if the
+                portal did not apply the selection.
+            IstaConnectionError: If a request fails.
+            IstaLoginError: If the session expired and relogin failed.
+        """
+        if not account_id or not account_id.strip():
+            raise IstaApiError("Account ID must be a non-empty string")
+
+        async with self._account_lock:
+            self._selecting_account = True
+            try:
+                await self._select_account_locked(account_id.strip())
+            finally:
+                self._selecting_account = False
+
+    async def _select_account_locked(self, account_id: str) -> None:
+        """Validate, switch and verify a property selection (lock held)."""
+        parser = AccountParser()
+
+        # 1. Read the linked properties from the read-only preload page.
+        html = await self._fetch_radio_preload()
+        known_ids = {account.account_id for account in parser.parse_accounts(html)}
+        if account_id not in known_ids:
+            _LOGGER.error(
+                "Property selection refused: the requested account is not linked "
+                "to this login (%d linked properties).",
+                len(known_ids),
+            )
+            raise IstaApiError(
+                "Unknown account ID: the property is not linked to this login"
+            )
+
+        # 2. Switch property the way the portal selector does.
+        _LOGGER.debug("Sending linked-property switch request.")
+        params = {
+            "metodo": "cambioAbonado",
+            "param": account_id,
+            "metodoDestino": "preCargaLecturasRadio",
+        }
+        data = {"idAbonado": account_id}
+        await self._send_request("POST", ACCOUNT_SWITCH_URL, params=params, data=data)
+
+        # 3. Verify: the preload page must mark the requested option selected.
+        verify_html = await self._fetch_radio_preload()
+        selected_id = parser.selected_account_id(verify_html)
+        if selected_id is None:
+            _LOGGER.error(
+                "Property selection could not be verified: no selected option found."
+            )
+            raise IstaApiError(
+                "Account selection could not be verified: the portal page shows "
+                "no selected property"
+            )
+        if selected_id != account_id:
+            _LOGGER.error(
+                "Property selection could not be verified: the portal kept a "
+                "different property selected."
+            )
+            raise IstaApiError(
+                "Account selection could not be verified: the portal kept a "
+                "different property selected"
+            )
+
+        self._account_id = account_id
+        _LOGGER.info("Linked-property selection verified.")
 
     async def _get_readings_chunk(
         self,
@@ -1078,33 +1326,78 @@ class VirtualApi:
         return fixed_device
 
     async def get_invoices(self) -> list[Invoice]:
-        """Fetch the invoice listing from the portal.
+        """Fetch every invoice-list page and return the deduplicated list.
+
+        The portal paginates the HTML invoice list (15 rows per page). This
+        method follows the paging anchors until the last page, stops on a
+        repeated page URL (portal loop), and reads at most
+        ``MAX_INVOICE_PAGES`` pages. Invoices with the same non-empty
+        ``invoice_id`` appear once.
 
         Returns:
-            List of Invoice objects parsed from the invoice listing page.
+            List of Invoice objects parsed from all pages, in portal order.
 
         Raises:
-            IstaConnectionError: If the request fails.
+            IstaConnectionError: If a request fails.
             IstaLoginError: If the session has expired and relogin failed.
-            IstaParserError: If the HTML cannot be parsed.
+            IstaParserError: If a page cannot be parsed.
         """
         _LOGGER.info("Fetching invoice list.")
-        params = {"metodo": "buscarRecibos"}
-        try:
-            response = await self._send_request("GET", INVOICES_URL, params=params)
-            html = await response.text()
-        except (IstaConnectionError, IstaLoginError) as err:
-            _LOGGER.error("Failed to fetch invoice list: %s", err)
-            raise
+        parser = InvoiceParser()
+        invoices: list[Invoice] = []
+        seen_ids: set[str] = set()
+        visited: set[str] = set()
+        url: str | URL = INVOICES_URL
+        params: dict[str, str] | None = {"metodo": "buscarRecibos"}
+        pages = 0
 
-        try:
-            parser = InvoiceParser()
-            invoices = parser.parse(html)
-        except IstaParserError:
-            _LOGGER.error("Failed to parse invoice list HTML.", exc_info=True)
-            raise
+        while pages < MAX_INVOICE_PAGES:
+            try:
+                response = await self._send_request("GET", url, params=params)
+                html = await response.text()
+                current_url = str(response.url)
+            except (IstaConnectionError, IstaLoginError) as err:
+                _LOGGER.error("Failed to fetch invoice list: %s", err)
+                raise
 
-        _LOGGER.info("Successfully retrieved %d invoice(s).", len(invoices))
+            pages += 1
+            visited.add(_normalize_page_url(current_url))
+
+            try:
+                page_invoices = parser.parse(html)
+            except IstaParserError:
+                _LOGGER.error("Failed to parse invoice list HTML.", exc_info=True)
+                raise
+
+            for invoice in page_invoices:
+                if invoice.invoice_id:
+                    if invoice.invoice_id in seen_ids:
+                        continue
+                    seen_ids.add(invoice.invoice_id)
+                invoices.append(invoice)
+
+            next_url = parser.next_page_url(html, current_url)
+            if next_url is None:
+                break
+            if _normalize_page_url(next_url) in visited:
+                _LOGGER.debug(
+                    "Invoice pagination returned to an already read page; stopping."
+                )
+                break
+            url = next_url
+            params = None
+        else:
+            _LOGGER.warning(
+                "Invoice list reached the maximum of %d pages; later invoices "
+                "may be missing.",
+                MAX_INVOICE_PAGES,
+            )
+
+        _LOGGER.info(
+            "Successfully retrieved %d invoice(s) from %d page(s).",
+            len(invoices),
+            pages,
+        )
         return invoices
 
     async def get_invoice_pdf(self, invoice_id: str) -> bytes:

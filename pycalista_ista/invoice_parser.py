@@ -10,6 +10,7 @@ import logging
 import re
 from datetime import date, datetime
 from typing import Final
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
@@ -28,6 +29,16 @@ _DATE_RE: Final = re.compile(r"^\d{2}/\d{2}/\d{4}$")
 _AMOUNT_RE: Final = re.compile(r"^[\d]+[.,][\d]+\s*€?$")
 # Period range pattern: "dd/mm/yyyy-dd/mm/yyyy" or "dd/mm/yyyy - dd/mm/yyyy"
 _PERIOD_RE: Final = re.compile(r"(\d{2}/\d{2}/\d{4})\s*[-–]\s*(\d{2}/\d{2}/\d{4})")
+
+# Portal table paging. The listing page numbers its pages with a display-tag
+# parameter such as "d-148657-p=2". The display-tag number is not stable, so
+# the parser matches any "d-<number>-p=<page>" pair.
+_PAGE_PARAM_RE: Final = re.compile(r"[?&;]d-\d+-p=(\d+)")
+# Sort/target selectors: "d-<number>-o=<n>" orders the table and
+# "d-<number>-e=<n>" selects the export format. They are not page links.
+_SELECTOR_PARAM_RE: Final = re.compile(r"[?&;]d-\d+-[oet]=")
+# Anchors that jump more than one page
+_MULTI_PAGE_LABELS: Final = frozenset({">>", "<<", ">>|", "|<<", "»", "«"})
 
 
 class InvoiceParser:
@@ -87,6 +98,76 @@ class InvoiceParser:
             _LOGGER.debug("Parsed invoice: %r", invoice)
 
         return invoices
+
+    def next_page_url(self, html: str, current_url: str) -> str | None:
+        """Return the URL of the next invoice-list page, or None.
+
+        The listing page publishes paging anchors whose href contains
+        ``metodo=listadoRecibos`` and a ``d-<number>-p=<page>`` parameter.
+        The exact ``>`` anchor wins. Otherwise the unique anchor that points
+        to ``current_page + 1`` is used. Anchors that jump several pages
+        (``>>``), sort links, and export links are ignored.
+
+        Args:
+            html: Raw HTML of the current invoice listing page.
+            current_url: URL of the current page, used to resolve relative
+                hrefs and to read the current page number.
+
+        Returns:
+            Absolute URL of the next page, or None on the last page or when
+            the next page cannot be identified without ambiguity.
+
+        Raises:
+            IstaParserError: If the HTML cannot be parsed at all.
+        """
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+        except Exception as err:
+            raise IstaParserError(f"Failed to parse invoice HTML: {err}") from err
+
+        current_page = self._page_number(current_url) or 1
+        exact_next: str | None = None
+        candidates: set[str] = set()
+
+        for link in soup.find_all("a", href=True):
+            href = str(link.get("href", "")).strip()
+            if not href or "listadoRecibos" not in href:
+                continue
+            if _SELECTOR_PARAM_RE.search(href):
+                continue
+            page = self._page_number(href)
+            if page is None:
+                continue
+            label = link.get_text(strip=True)
+            if label in _MULTI_PAGE_LABELS:
+                continue
+            url = urljoin(current_url, href)
+            if label == ">" and exact_next is None:
+                exact_next = url
+            if page == current_page + 1:
+                candidates.add(url)
+
+        if exact_next is not None:
+            return exact_next
+        if len(candidates) == 1:
+            return next(iter(candidates))
+        if len(candidates) > 1:
+            _LOGGER.debug(
+                "Invoice pagination is ambiguous: %d candidate next pages.",
+                len(candidates),
+            )
+        return None
+
+    @staticmethod
+    def _page_number(url: str) -> int | None:
+        """Return the paging number of a URL, or None when it has none."""
+        match = _PAGE_PARAM_RE.search(url)
+        if not match:
+            return None
+        try:
+            return int(match.group(1))
+        except ValueError:  # pragma: no cover - regex only matches digits
+            return None
 
     def _parse_row(self, invoice_id: str, row: any) -> Invoice:
         """Extract invoice metadata from a table row.
