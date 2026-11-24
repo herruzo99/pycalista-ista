@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import re
 from datetime import date, timedelta
 from html.parser import HTMLParser
 from typing import Any, Final
@@ -133,15 +134,37 @@ def _cookie_names(session: ClientSession, url: object) -> list[str]:
     return sorted(cookie.key for cookie in filtered.values())
 
 
-def _redact_response_snippet(text: str) -> str:
-    """Return a short loggable response snippet without property data.
+_SENSITIVE_PAIR_RE: Final = re.compile(
+    r"(?<![\w-])("
+    + "|".join(sorted(SENSITIVE_KEYS, key=len, reverse=True))
+    + r")=([^&\s\"'<>]+)",
+    re.IGNORECASE,
+)
 
-    Any authenticated page carries the linked-property selector, whose
-    options hold opaque property IDs and labels. Such pages are not logged.
+
+def _redact_sensitive_pairs(text: str) -> str:
+    """Mask sensitive ``key=value`` pairs in arbitrary text or HTML.
+
+    Matches query strings, HTML attributes, and HTML-escaped separators
+    (``&amp;``), so a page body can be logged safely.
     """
-    if ACCOUNT_SELECT_MARKER in text:
+    return _SENSITIVE_PAIR_RE.sub(
+        lambda match: f"{match.group(1)}={MASKED_VALUE}", text
+    )
+
+
+def _redact_response_snippet(text: str, max_chars: int = 250) -> str:
+    """Return a short loggable response snippet without sensitive data.
+
+    Two rules apply. Any authenticated page carries the linked-property
+    selector, whose options hold opaque property IDs and labels, so such
+    pages are not logged at all. Every other body is truncated and then has
+    sensitive query values masked, because Keycloak pages embed one-time
+    tokens (``session_code``, ``execution``, ...) in their form action.
+    """
+    if ACCOUNT_SELECT_MARKER.lower() in text.lower():
         return "<page with linked-property selector omitted>"
-    return text[:250].replace("\n", "")
+    return _redact_sensitive_pairs(text[:max_chars].replace("\n", ""))
 
 
 def _normalize_page_url(url: object) -> str:
@@ -198,11 +221,13 @@ class VirtualApi:
         # Property to restore after every authentication (configured or last
         # selected). None means "keep the portal default property".
         self._requested_account_id: str | None = account_id
-        # Verified selected property. Set only after the portal confirms it.
+        # Verified selected property. Set only after the portal confirms it,
+        # and cleared before every authentication.
         self._account_id: str | None = None
-        # True while select_account() runs, to stop login() from recursing
-        # into another selection after a relogin.
-        self._selecting_account: bool = False
+        # Task that is inside select_account(). A login started inside that
+        # task (relogin) must not start another selection. A login in any
+        # other task does not skip its own selection.
+        self._selecting_task: asyncio.Task[Any] | None = None
 
     @property
     def account_id(self) -> str | None:
@@ -211,6 +236,8 @@ class VirtualApi:
 
     async def close(self) -> None:
         """Close the underlying aiohttp session if created internally."""
+        # The session (and its property selection) may be gone after this.
+        self._account_id = None
         if self._close_session and self.session and not self.session.closed:
             await self.session.close()
 
@@ -303,13 +330,14 @@ class VirtualApi:
             if session_expired and relogin:
                 _LOGGER.info(
                     "Request to %s returned a login page. Session may have expired. Attempting relogin.",
-                    url,
+                    _redact_url(url),
                 )
                 if await self.relogin():  # Attempt relogin
                     # Retry through _send_request with relogin disabled to prevent
                     # infinite recursion while still getting full response validation.
                     _LOGGER.debug(
-                        "Relogin successful, retrying original request to %s", url
+                        "Relogin successful, retrying original request to %s",
+                        _redact_url(url),
                     )
                     return await self._send_request(
                         method, url, retry_attempts, relogin=False, **kwargs
@@ -340,7 +368,7 @@ class VirtualApi:
             _LOGGER.error(
                 "Request failed with unrecoverable status %s for URL %s: %s",
                 err.status,
-                url,
+                _redact_url(url),
                 err.message,
             )
             raise IstaConnectionError(
@@ -382,7 +410,7 @@ class VirtualApi:
                 )
             _LOGGER.error(
                 "Request to %s failed after all retries due to %s: %s",
-                url,
+                _redact_url(url),
                 type(err).__name__,
                 err,
             )
@@ -395,6 +423,9 @@ class VirtualApi:
             True if login was successful, False otherwise.
         """
         _LOGGER.info("Attempting relogin for user %s", self.username)
+        # The session is replaced, so the previous property selection is no
+        # longer known to be active. login() re-establishes it.
+        self._account_id = None
         # Clear cookies specific to these domains to prevent stale session errors
         # during the Keycloak OAuth2 flow in long-lived client sessions.
         self.session.cookie_jar.clear_domain("oficina.ista.es")
@@ -583,7 +614,7 @@ class VirtualApi:
                     "Login failed for %s: %s. Response snippet: %s",
                     self.username,
                     err_msg,
-                    error_body[:300].replace("\n", ""),
+                    _redact_response_snippet(error_body, max_chars=300),
                 )
                 raise IstaLoginError(f"Login failed – {err_msg}")
             except IstaLoginError:
@@ -627,10 +658,16 @@ class VirtualApi:
                 flow cannot be completed.
             IstaConnectionError: If a network request fails.
             IstaApiError: If the configured property can no longer be
-                selected or verified.
+                selected or verified. ``account_id`` then reports None.
+
+        ``account_id`` is cleared before authentication, because the session
+        is replaced. It reports a property only after verification.
         """
         async with self._login_lock:
             _LOGGER.info("Attempting Keycloak OAuth2 login for user: %s", self.username)
+            # Authentication replaces the session, so the verified property
+            # is unknown until the selection is verified again below.
+            self._account_id = None
             try:
                 # Step 1 – obtain one-time form action URL and hidden inputs from Keycloak.
                 referer_url, action_url, form_inputs = await self._discover_kc_form()
@@ -660,9 +697,13 @@ class VirtualApi:
                 raise
 
         # Step 4 – restore the configured property selection. A login started
-        # from inside select_account() (relogin) skips it: that caller verifies
-        # the selection itself.
-        if self._requested_account_id is not None and not self._selecting_account:
+        # from inside select_account() in this task (relogin) skips it: that
+        # caller verifies the selection itself. A login in another task never
+        # skips, so each concurrent login verifies the property it returns.
+        if (
+            self._requested_account_id is not None
+            and self._selecting_task is not asyncio.current_task()
+        ):
             await self.select_account(self._requested_account_id)
 
         return True
@@ -670,6 +711,7 @@ class VirtualApi:
     async def logout(self) -> None:
         """Log out from the Ista Calista virtual office asynchronously."""
         _LOGGER.info("Logging out user: %s", self.username)
+        self._account_id = None
         try:
             # We expect a redirect to login page or similar, so we disable auto-relogin
             # to prevent an infinite loop or unnecessary login after logout.
@@ -768,11 +810,11 @@ class VirtualApi:
             raise IstaApiError("Account ID must be a non-empty string")
 
         async with self._account_lock:
-            self._selecting_account = True
+            self._selecting_task = asyncio.current_task()
             try:
                 await self._select_account_locked(account_id.strip())
             finally:
-                self._selecting_account = False
+                self._selecting_task = None
 
     async def _select_account_locked(self, account_id: str) -> None:
         """Validate, switch and verify a property selection (lock held)."""
@@ -931,7 +973,7 @@ class VirtualApi:
                 _LOGGER.error(
                     "Expected Excel file but received content type '%s'. This may indicate a session or API issue. Response snippet: %s",
                     content_type,
-                    response_text[:250].replace("\n", ""),
+                    _redact_response_snippet(response_text),
                 )
                 if (
                     "text/html" in content_type

@@ -195,6 +195,32 @@ async def test_pycalista_login_unexpected_exception_wrapped(
             await ista_main_client.login()
 
 
+async def test_pycalista_login_api_error_keeps_identity(
+    ista_main_client: PyCalistaIsta,
+):
+    """A documented IstaApiError from login is re-raised unchanged.
+
+    D5: the facade re-wrapped it as an "unexpected" error, which hides the
+    real cause (for example a linked property that is no longer available).
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from pycalista_ista.exception_classes import IstaApiError
+
+    original = IstaApiError("Unknown account ID: the property is not linked")
+    with patch.object(
+        ista_main_client._virtual_api,
+        "login",
+        new_callable=AsyncMock,
+        side_effect=original,
+    ):
+        with pytest.raises(IstaApiError) as error:
+            await ista_main_client.login()
+
+    assert error.value is original
+    assert "unexpected" not in str(error.value).lower()
+
+
 @pytest.mark.asyncio
 async def test_get_devices_history_unexpected_exception_wrapped(
     ista_main_client: PyCalistaIsta,

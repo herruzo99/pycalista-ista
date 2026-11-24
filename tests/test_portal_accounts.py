@@ -1,5 +1,6 @@
 """Tests for linked-property discovery and selection (experimental)."""
 
+import asyncio
 import re
 from typing import Any
 
@@ -44,15 +45,21 @@ def install_account_mocks(
     options: list[tuple[str, str]],
     selected: str | None = None,
     apply_switch: bool = True,
+    switch_hook: Any = None,
 ) -> dict[str, Any]:
     """Mock the preload page and the property-switch POST.
 
     The preload page reports the property switched by the last POST, like
     the portal does. With ``apply_switch=False`` the mocked portal answers
-    the POST but keeps the page unchanged. Returns a state dict with the
-    recorded switches.
+    the POST but keeps the page unchanged. ``switch_hook`` is awaited with
+    the switch count before the page is updated. Returns a state dict with
+    the recorded switches.
     """
-    state: dict[str, Any] = {"selected": selected, "switches": []}
+    state: dict[str, Any] = {
+        "selected": selected,
+        "apply_switch": apply_switch,
+        "switches": [],
+    }
 
     def preload_callback(url, **kwargs):
         return CallbackResult(
@@ -61,10 +68,12 @@ def install_account_mocks(
             content_type="text/html; charset=UTF-8",
         )
 
-    def switch_callback(url, **kwargs):
+    async def switch_callback(url, **kwargs):
         data = dict(kwargs.get("data") or {})
         state["switches"].append({"url": str(url), "data": data})
-        if apply_switch:
+        if switch_hook is not None:
+            await switch_hook(len(state["switches"]))
+        if state["apply_switch"]:
             state["selected"] = data.get("idAbonado")
         return CallbackResult(
             status=200,
@@ -346,3 +355,100 @@ async def test_login_fails_when_property_is_no_longer_linked(
         await client.login()
 
     assert client.account_id is None
+
+
+async def test_failed_reselection_clears_the_reported_property(
+    mock_aiohttp_session, mock_responses: aioresponses
+):
+    """After a failed reselection, account_id reports None, not a stale ID."""
+    state = install_account_mocks(
+        mock_responses, [(ACCOUNT_A, LABEL_A), (ACCOUNT_B, LABEL_B)]
+    )
+    mock_login_success(mock_responses)
+    client = PyCalistaIsta(
+        email=TEST_EMAIL,
+        password=TEST_PASSWORD,
+        session=mock_aiohttp_session,
+        account_id=ACCOUNT_B,
+    )
+    assert await client.login() is True
+    assert client.account_id == ACCOUNT_B
+
+    # The portal now keeps another property selected and ignores the switch.
+    state["apply_switch"] = False
+    state["selected"] = ACCOUNT_A
+
+    with pytest.raises(IstaApiError):
+        await client._virtual_api.relogin()
+
+    assert client.account_id is None
+
+
+async def test_logout_clears_the_reported_property(
+    mock_aiohttp_session, mock_responses: aioresponses
+):
+    """A logged-out client must not report a selected property."""
+    install_account_mocks(mock_responses, [(ACCOUNT_A, LABEL_A), (ACCOUNT_B, LABEL_B)])
+    mock_login_success(mock_responses)
+    mock_responses.get(
+        re.compile(
+            re.escape("https://oficina.ista.es/GesCon/")
+            + r"GestionOficinaVirtual\.do.*"
+        ),
+        status=200,
+        body="<html>bye</html>",
+    )
+    client = PyCalistaIsta(
+        email=TEST_EMAIL,
+        password=TEST_PASSWORD,
+        session=mock_aiohttp_session,
+        account_id=ACCOUNT_B,
+    )
+    assert await client.login() is True
+    assert client.account_id == ACCOUNT_B
+
+    await client._virtual_api.logout()
+
+    assert client.account_id is None
+
+
+async def test_concurrent_login_does_not_skip_its_own_selection(
+    mock_aiohttp_session, mock_responses: aioresponses
+):
+    """A login in another task still selects and verifies the property.
+
+    One task holds the property-selection lock; a second task logs in. The
+    second login must not skip its own selection because of the first task.
+    """
+    in_switch = asyncio.Event()
+    release_switch = asyncio.Event()
+
+    async def hold_first_switch(switch_number: int) -> None:
+        # Block only the first switch, so the other task stays inside
+        # select_account() while the second task logs in.
+        if switch_number == 1:
+            in_switch.set()
+            await release_switch.wait()
+
+    state = install_account_mocks(
+        mock_responses,
+        [(ACCOUNT_A, LABEL_A), (ACCOUNT_B, LABEL_B)],
+        switch_hook=hold_first_switch,
+    )
+    mock_login_success(mock_responses)
+    client = PyCalistaIsta(
+        email=TEST_EMAIL,
+        password=TEST_PASSWORD,
+        session=mock_aiohttp_session,
+        account_id=ACCOUNT_B,
+    )
+
+    first = asyncio.create_task(client.select_account(ACCOUNT_B))
+    await asyncio.wait_for(in_switch.wait(), timeout=5)
+    second = asyncio.create_task(client.login())
+    await asyncio.sleep(0.05)
+    release_switch.set()
+    await asyncio.wait_for(asyncio.gather(first, second), timeout=10)
+
+    assert len(state["switches"]) == 2
+    assert client.account_id == ACCOUNT_B

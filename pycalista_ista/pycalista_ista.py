@@ -161,6 +161,11 @@ class PyCalistaIsta:
                 err,
             )
             raise
+        except IstaApiError:
+            # Documented API errors (for example a property that is no longer
+            # linked) keep their message and their type.
+            _LOGGER.error("Login failed for user %s with an API error.", self.account)
+            raise
         except Exception as err:
             # Catch other potential errors from VirtualApi.login
             _LOGGER.exception(

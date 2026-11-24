@@ -2,6 +2,7 @@
 
 import logging
 import re
+from datetime import date
 
 import aiohttp
 import pytest
@@ -10,11 +11,18 @@ from yarl import URL
 
 from pycalista_ista import PyCalistaIsta
 from pycalista_ista.const import DATA_URL
+from pycalista_ista.exception_classes import (
+    IstaApiError,
+    IstaConnectionError,
+    IstaLoginError,
+)
 from pycalista_ista.virtual_api import (
     MASKED_VALUE,
+    VirtualApi,
     _cookie_names,
     _redact_mapping,
     _redact_response_snippet,
+    _redact_sensitive_pairs,
     _redact_url,
 )
 from tests.conftest import TEST_EMAIL, mock_login_success
@@ -32,6 +40,35 @@ PROPERTY_ID = "9f3c1a77b2e4d001"
 PROPERTY_LABEL = "Calle Mayor 1, 2ºA"
 
 PRELOAD_PATTERN = re.compile(re.escape(DATA_URL) + r".*preCargaLecturasRadio.*")
+READINGS_PATTERN = re.compile(re.escape(DATA_URL) + r".*listadoLecturasRadio.*")
+KC_DISCOVERY_PATTERN = re.compile(r"https://login\.ista\.com/.*auth.*")
+KC_ACTION_PATTERN = re.compile(
+    re.escape("https://login.ista.com/mock-auth-action") + r".*"
+)
+
+# One-time Keycloak tokens, as they appear in the login form action URL.
+KC_SESSION_CODE = "Zq7-session-code-value"
+KC_EXECUTION = "Zq7-execution-value"
+KC_TAB_ID = "Zq7-tab-value"
+KC_TOKENS = (KC_SESSION_CODE, KC_EXECUTION, KC_TAB_ID)
+KC_ACTION_URL = (
+    "https://login.ista.com/mock-auth-action"
+    f"?session_code={KC_SESSION_CODE}&execution={KC_EXECUTION}"
+    f"&client_id=abonado-service&tab_id={KC_TAB_ID}"
+)
+
+
+def kc_login_page(action_url: str = KC_ACTION_URL) -> str:
+    """Return a synthetic Keycloak login form page."""
+    return (
+        "<html><body>"
+        f'<form method="post" action="{action_url}">'
+        '<input type="text" name="username"/>'
+        '<input type="password" name="password"/>'
+        "</form></body></html>"
+    )
+
+
 SWITCH_PATTERN = re.compile(
     r"https://oficina\.ista\.es/GesCon/GestionOficinaVirtual\.do.*"
 )
@@ -173,3 +210,141 @@ async def test_redact_helpers_mask_sensitive_values():
     )
     async with aiohttp.ClientSession() as session:
         assert _cookie_names(session, "https://oficina.ista.es/") == []
+
+
+async def test_keycloak_action_url_tokens_are_masked_on_error(
+    mock_aiohttp_session, mock_responses: aioresponses, caplog
+):
+    """A failing request logs the action URL without its one-time tokens.
+
+    D1: the unrecoverable-status log line used the raw URL. The discovery
+    snippet (D2) must be masked too.
+    """
+    caplog.set_level(logging.DEBUG)
+    mock_responses.get(
+        KC_DISCOVERY_PATTERN,
+        status=200,
+        headers={"Content-Type": "text/html;charset=utf-8"},
+        body=kc_login_page().encode(),
+        repeat=True,
+    )
+    mock_responses.post(
+        KC_ACTION_PATTERN,
+        status=403,
+        headers={"Content-Type": "text/html;charset=utf-8"},
+        body=b"<html>Forbidden</html>",
+        repeat=True,
+    )
+    client = VirtualApi(
+        username=TEST_EMAIL, password=SECRET_PASSWORD, session=mock_aiohttp_session
+    )
+
+    with pytest.raises(IstaConnectionError):
+        await client.login()
+
+    messages = [record.getMessage() for record in caplog.records]
+    status_lines = [
+        message
+        for message in messages
+        if message.startswith("Request failed with unrecoverable status")
+    ]
+    snippet_lines = [message for message in messages if "Received response" in message]
+    assert status_lines, "expected the unrecoverable-status error log"
+    assert snippet_lines, "expected the response log"
+    for value in KC_TOKENS:
+        assert value not in caplog.text, "a Keycloak token appears in the logs"
+    assert MASKED_VALUE in status_lines[0]
+
+
+async def test_credential_failure_page_tokens_are_masked(
+    mock_aiohttp_session, mock_responses: aioresponses, caplog
+):
+    """The Keycloak error page is logged without its one-time tokens.
+
+    D2: the credential-failure path logged the raw body snippet.
+    """
+    caplog.set_level(logging.DEBUG)
+    error_page = (
+        "<html><body>"
+        f'<form method="post" action="{KC_ACTION_URL}">'
+        '<div class="kc-feedback-text">Invalid username or password.</div>'
+        "</form></body></html>"
+    )
+    mock_responses.get(
+        KC_DISCOVERY_PATTERN,
+        status=200,
+        headers={"Content-Type": "text/html;charset=utf-8"},
+        body=kc_login_page().encode(),
+        repeat=True,
+    )
+    mock_responses.post(
+        KC_ACTION_PATTERN,
+        status=200,
+        headers={"Content-Type": "text/html;charset=utf-8"},
+        body=error_page.encode(),
+        repeat=True,
+    )
+    client = VirtualApi(
+        username=TEST_EMAIL, password=SECRET_PASSWORD, session=mock_aiohttp_session
+    )
+
+    with pytest.raises(IstaLoginError):
+        await client.login()
+
+    failure_lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "Login failed" in record.getMessage()
+    ]
+    assert failure_lines, "expected the credential-failure error log"
+    assert "Invalid username or password" in failure_lines[0]
+    for value in KC_TOKENS:
+        assert value not in caplog.text, "a Keycloak token appears in the logs"
+
+
+async def test_readings_snippet_redacts_the_selector_page(
+    mock_aiohttp_session, mock_responses: aioresponses, caplog
+):
+    """An HTML answer on the readings path logs no property ID or label.
+
+    D3: the readings path logged the first 250 characters raw, and the
+    session-expired page is exactly the linked-property selector page.
+    """
+    caplog.set_level(logging.DEBUG)
+    mock_responses.get(
+        READINGS_PATTERN,
+        status=200,
+        headers={"Content-Type": "text/html; charset=UTF-8"},
+        body=account_page(selected=PROPERTY_ID).encode(),
+        repeat=True,
+    )
+    client = VirtualApi(
+        username=TEST_EMAIL, password=SECRET_PASSWORD, session=mock_aiohttp_session
+    )
+
+    with pytest.raises(IstaApiError):
+        await client.get_devices_history(date(2026, 2, 1), date(2026, 2, 2))
+
+    mismatch_lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "Expected Excel file" in record.getMessage()
+    ]
+    assert mismatch_lines, "expected the content-type error log"
+    assert PROPERTY_ID not in caplog.text, "the property ID appears in the logs"
+    assert PROPERTY_LABEL not in caplog.text, "the property label appears in the logs"
+
+
+async def test_redact_pairs_masks_html_escaped_query_values():
+    """Sensitive pairs are masked in plain text, URLs and HTML attributes."""
+    escaped = (
+        '<form action="https://login.ista.com/x?session_code=AAA&amp;'
+        'execution=BBB&tab_id=CCC">'
+    )
+    masked = _redact_sensitive_pairs(escaped)
+
+    assert "AAA" not in masked
+    assert "BBB" not in masked
+    assert "CCC" not in masked
+    assert masked.count(MASKED_VALUE) == 3
+    assert _redact_sensitive_pairs("metodo=buscarRecibos") == "metodo=buscarRecibos"
