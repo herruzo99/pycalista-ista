@@ -21,7 +21,8 @@ This project is based on [ecotrend-ista](https://github.com/Ludy87/ecotrend-ista
 -   Login and session management with automatic cookie handling.
 -   Retrieve consumption data for heating and water meters.
 -   **Billed Consumption**: Retrieve billed readings and historical consumption data.
--   **Invoice Parsing**: Support for extracting data from HTML invoice lists and Excel exports.
+-   **Invoice Parsing**: Support for extracting data from HTML invoice lists (all pages) and Excel exports.
+-   **Linked properties (experimental)**: List and select the properties linked to one login.
 -   Parse Excel reports (`.xls`, `.xlsx`) from Ista Calista using `pandas` and `openpyxl`.
 -   Support for different meter types (heating, hot water, cold water).
 -   Automatic handling of session expiration and relogin attempts.
@@ -92,6 +93,30 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+### Linked properties (experimental)
+
+One login can have more than one linked property. Multi-property support is
+**experimental**: it was validated with a single live property only.
+
+```python
+await client.login()
+
+accounts = await client.list_accounts()
+for account in accounts:
+    print(account.account_id, account.label)
+
+# Switch property; the portal selection is verified before it is accepted.
+await client.select_account(accounts[1].account_id)
+
+# Or select it at every login, including after a relogin:
+client = PyCalistaIsta("your@email.com", "your_password", account_id="opaque-id")
+```
+
+Property IDs are opaque and belong to the current session. Do not log them.
+
+`get_invoices()` now reads every invoice-list page, deduplicates by
+`invoice_id`, stops on a repeated page URL, and reads at most 50 pages.
 
 ## Development
 
