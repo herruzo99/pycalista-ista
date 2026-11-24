@@ -86,13 +86,17 @@ async def test_login_debug_logs_hide_password_and_cookies(
 async def test_property_id_and_label_are_not_logged(
     mock_aiohttp_session, mock_responses: aioresponses, caplog
 ):
-    """Discovery and selection never log the property ID or its label."""
+    """Discovery and selection never log the property ID or its label.
+
+    The mocked page has one property and no ``selected`` attribute, which is
+    the live shape after a switch, so the default-selection path is covered.
+    """
     caplog.set_level(logging.DEBUG)
 
     def preload_callback(url, **kwargs):
         return CallbackResult(
             status=200,
-            body=account_page(selected=PROPERTY_ID),
+            body=account_page(),
             content_type="text/html; charset=UTF-8",
         )
 

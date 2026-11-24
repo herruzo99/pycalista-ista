@@ -163,7 +163,7 @@ async def test_select_account_failed_verification_raises(
 async def test_select_account_without_selected_option_raises(
     ista_api_client: VirtualApi, mock_responses: aioresponses
 ):
-    """No selected option in the verification page is a failure."""
+    """Two linked properties and no selected attribute are a failure."""
     state = install_account_mocks(
         mock_responses,
         [(ACCOUNT_A, LABEL_A), (ACCOUNT_B, LABEL_B)],
@@ -175,6 +175,61 @@ async def test_select_account_without_selected_option_raises(
 
     assert len(state["switches"]) == 1
     assert ista_api_client.account_id is None
+
+
+async def test_select_account_never_guesses_between_properties(
+    ista_api_client: VirtualApi, mock_responses: aioresponses
+):
+    """The HTML default option is not accepted when two properties exist.
+
+    Here the first usable option is the requested one, so a careless default
+    check would accept it. The library must not guess between properties.
+    """
+    state = install_account_mocks(
+        mock_responses,
+        [(ACCOUNT_A, LABEL_A), (ACCOUNT_B, LABEL_B)],
+        apply_switch=False,
+    )
+
+    with pytest.raises(IstaApiError):
+        await ista_api_client.select_account(ACCOUNT_A)
+
+    assert len(state["switches"]) == 1
+    assert ista_api_client.account_id is None
+
+
+async def test_select_account_single_property_without_selected_succeeds(
+    ista_api_client: VirtualApi, mock_responses: aioresponses
+):
+    """One linked property and no selected attribute is accepted.
+
+    This is the live shape: after the switch POST the preload page has no
+    selected option. With one property the HTML default is that property.
+    """
+    state = install_account_mocks(
+        mock_responses, [(ACCOUNT_A, LABEL_A)], apply_switch=False
+    )
+
+    await ista_api_client.select_account(ACCOUNT_A)
+
+    assert len(state["switches"]) == 1
+    assert ista_api_client.account_id == ACCOUNT_A
+
+
+async def test_select_account_single_property_with_separator_succeeds(
+    ista_api_client: VirtualApi, mock_responses: aioresponses
+):
+    """A separator option before the only property does not break the default."""
+    state = install_account_mocks(
+        mock_responses,
+        [("", "Seleccione un abonado"), ("----", "--------"), (ACCOUNT_A, LABEL_A)],
+        apply_switch=False,
+    )
+
+    await ista_api_client.select_account(ACCOUNT_A)
+
+    assert len(state["switches"]) == 1
+    assert ista_api_client.account_id == ACCOUNT_A
 
 
 async def test_facade_select_account_maps_errors(
@@ -251,6 +306,27 @@ async def test_relogin_reselects_the_property(
 
     assert len(state["switches"]) == 2
     assert client.account_id == ACCOUNT_B
+
+
+async def test_login_single_property_without_selected_succeeds(
+    mock_aiohttp_session, mock_responses: aioresponses
+):
+    """The live single-property login path verifies by the HTML default."""
+    state = install_account_mocks(
+        mock_responses, [(ACCOUNT_A, LABEL_A)], apply_switch=False
+    )
+    mock_login_success(mock_responses)
+    client = PyCalistaIsta(
+        email=TEST_EMAIL,
+        password=TEST_PASSWORD,
+        session=mock_aiohttp_session,
+        account_id=ACCOUNT_A,
+    )
+
+    assert await client.login() is True
+
+    assert len(state["switches"]) == 1
+    assert client.account_id == ACCOUNT_A
 
 
 async def test_login_fails_when_property_is_no_longer_linked(

@@ -746,6 +746,12 @@ class VirtualApi:
         opaque property ID, followed by a GET of the radio preload page to
         verify the selected option.
 
+        Verification rule: an explicit ``selected`` option must match the
+        requested ID. When the page has no ``selected`` option, the HTML
+        default applies (the browser selects the first usable option). That
+        default is accepted only when the login has exactly one linked
+        property, so the library never guesses between properties.
+
         EXPERIMENTAL: multi-property support is not yet validated against an
         account with more than one linked property.
 
@@ -795,25 +801,40 @@ class VirtualApi:
         data = {"idAbonado": account_id}
         await self._send_request("POST", ACCOUNT_SWITCH_URL, params=params, data=data)
 
-        # 3. Verify: the preload page must mark the requested option selected.
+        # 3. Verify: the preload page must show the requested property.
+        # An explicit "selected" attribute wins. The live single-property
+        # portal sends no selected attribute after the switch, so HTML
+        # default semantics apply there: the browser selects the first usable
+        # option. That default is accepted only when the login has exactly
+        # one property, so the library never guesses between homes.
         verify_html = await self._fetch_radio_preload()
+        verify_accounts = parser.parse_accounts(verify_html)
         selected_id = parser.selected_account_id(verify_html)
-        if selected_id is None:
-            _LOGGER.error(
-                "Property selection could not be verified: no selected option found."
-            )
-            raise IstaApiError(
-                "Account selection could not be verified: the portal page shows "
-                "no selected property"
-            )
-        if selected_id != account_id:
-            _LOGGER.error(
-                "Property selection could not be verified: the portal kept a "
-                "different property selected."
-            )
-            raise IstaApiError(
-                "Account selection could not be verified: the portal kept a "
-                "different property selected"
+        if selected_id is not None:
+            if selected_id != account_id:
+                _LOGGER.error(
+                    "Property selection could not be verified: the portal kept a "
+                    "different property selected."
+                )
+                raise IstaApiError(
+                    "Account selection could not be verified: the portal kept a "
+                    "different property selected"
+                )
+        else:
+            effective_id = parser.effective_account_id(verify_html)
+            if len(verify_accounts) != 1 or effective_id != account_id:
+                _LOGGER.error(
+                    "Property selection could not be verified: no selected option "
+                    "and %d linked properties.",
+                    len(verify_accounts),
+                )
+                raise IstaApiError(
+                    "Account selection could not be verified: the portal page shows "
+                    "no selected property"
+                )
+            _LOGGER.debug(
+                "Property selection verified by the HTML default option "
+                "(single linked property)."
             )
 
         self._account_id = account_id

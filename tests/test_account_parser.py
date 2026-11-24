@@ -46,3 +46,48 @@ def test_account_parser_reads_selected_option():
     )
 
     assert AccountParser().selected_account_id(html) == ACCOUNT_B
+
+
+def test_effective_account_id_uses_first_usable_option_as_default():
+    """Without a selected attribute, the first usable option is effective.
+
+    Separator options come before it and are not properties, so they are not
+    the default (this is the live single-property shape after a switch).
+    """
+    html = (
+        "<html><body><select name='idAbonado'>"
+        '<option value="">Seleccione un abonado</option>'
+        '<option value="----">--------</option>'
+        '<option disabled value="frozen">Bloqueado</option>'
+        f'<option value="{ACCOUNT_A}">{LABEL_A}</option>'
+        "</select></body></html>"
+    )
+
+    parser = AccountParser()
+    assert parser.selected_account_id(html) is None
+    assert parser.effective_account_id(html) == ACCOUNT_A
+
+
+def test_effective_account_id_prefers_explicit_selection():
+    """An explicit selected attribute wins over the first usable option."""
+    html = (
+        "<html><body><select name='idAbonado'>"
+        f'<option value="{ACCOUNT_A}">{LABEL_A}</option>'
+        f'<option value="{ACCOUNT_B}" selected>{LABEL_B}</option>'
+        "</select></body></html>"
+    )
+
+    assert AccountParser().effective_account_id(html) == ACCOUNT_B
+
+
+def test_effective_account_id_without_selector_is_none():
+    """A page without usable properties has no effective selection."""
+    assert AccountParser().effective_account_id("<html><body></body></html>") is None
+    assert (
+        AccountParser().effective_account_id(
+            "<html><body><select name='idAbonado'>"
+            '<option value="">Seleccione</option>'
+            "</select></body></html>"
+        )
+        is None
+    )

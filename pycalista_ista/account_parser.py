@@ -114,3 +114,26 @@ class AccountParser:
                 return None
             return cleaned[0]
         return None
+
+    def effective_account_id(self, html: str) -> str | None:
+        """Return the property a browser treats as selected.
+
+        HTML default semantics: an option with the ``selected`` attribute
+        wins. When no option has it, the browser selects the first option.
+        Placeholder and separator options are not properties, so the first
+        usable option is returned instead.
+
+        Args:
+            html: Raw HTML of an authenticated portal page.
+
+        Returns:
+            The opaque ID of the effective selection, or None if the page has
+            no selector or no usable option.
+        """
+        explicit_id = self.selected_account_id(html)
+        if explicit_id is not None:
+            return explicit_id
+        accounts = self.parse_accounts(html)
+        if not accounts:
+            return None
+        return accounts[0].account_id
