@@ -15,7 +15,12 @@ from aiohttp import ClientSession
 
 from .__version import __version__
 from .const import LOG_LEVEL_MAP
-from .exception_classes import IstaApiError, IstaConnectionError, IstaLoginError, IstaParserError
+from .exception_classes import (
+    IstaApiError,
+    IstaConnectionError,
+    IstaLoginError,
+    IstaParserError,
+)
 from .models import Device
 from .models.billed_reading import BilledReading
 from .models.invoice import Invoice

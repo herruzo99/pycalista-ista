@@ -99,13 +99,13 @@ def _redact_mapping(data: object) -> object:
     if isinstance(data, dict):
         return {key: _mask_value(key, value) for key, value in data.items()}
     if isinstance(data, (list, tuple)):
-        try:
-            return [
-                (_mask_value(str(key), value),) + tuple(rest)
-                for key, *rest in data
-            ]
-        except (TypeError, ValueError):  # pragma: no cover - defensive
-            return MASKED_VALUE
+        pairs: list[tuple[object, object]] = []
+        for pair in data:
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                return MASKED_VALUE
+            key, value = pair
+            pairs.append((key, _mask_value(str(key), value)))
+        return pairs
     return MASKED_VALUE
 
 
@@ -286,7 +286,7 @@ class VirtualApi:
                 "Received response: Status=%s, Content-Type=%s, URL=%s, Snippet=%s",
                 response.status,
                 response.headers.get("Content-Type"),
-                response.url,
+                _redact_url(response.url),
                 response_text_snippet,
             )
 
@@ -400,7 +400,7 @@ class VirtualApi:
         self.session.cookie_jar.clear_domain("oficina.ista.es")
         self.session.cookie_jar.clear_domain("login.ista.com")
         self.session.cookie_jar.clear_domain("acceso.ista.es")
-        
+
         return await self.login()
 
     @staticmethod

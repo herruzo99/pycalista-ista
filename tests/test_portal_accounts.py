@@ -7,7 +7,6 @@ import pytest
 from aioresponses import CallbackResult, aioresponses
 
 from pycalista_ista import PyCalistaIsta
-from pycalista_ista.account_parser import AccountParser
 from pycalista_ista.const import ACCOUNT_SWITCH_URL, DATA_URL
 from pycalista_ista.exception_classes import IstaApiError
 from pycalista_ista.models import PortalAccount
@@ -17,9 +16,7 @@ from tests.conftest import TEST_EMAIL, TEST_PASSWORD, mock_login_success
 pytestmark = pytest.mark.asyncio
 
 PRELOAD_PATTERN = re.compile(re.escape(DATA_URL) + r".*preCargaLecturasRadio.*")
-SWITCH_PATTERN = re.compile(
-    re.escape(ACCOUNT_SWITCH_URL) + r".*metodo=cambioAbonado.*"
-)
+SWITCH_PATTERN = re.compile(re.escape(ACCOUNT_SWITCH_URL) + r".*metodo=cambioAbonado.*")
 
 # Opaque IDs and labels modelled on the portal: long, meaningless strings.
 ACCOUNT_A = "9f3c1a77b2e4d001"
@@ -28,9 +25,7 @@ LABEL_A = "Calle Mayor 1, 2ºA"
 LABEL_B = "Garaje Calle Mayor 1"
 
 
-def account_page(
-    options: list[tuple[str, str]], selected: str | None = None
-) -> str:
+def account_page(options: list[tuple[str, str]], selected: str | None = None) -> str:
     """Return a synthetic portal page with the linked-property selector."""
     rendered = []
     for value, label in options:
@@ -101,9 +96,7 @@ async def test_list_accounts_two_properties(
     ista_main_client: PyCalistaIsta, mock_responses: aioresponses
 ):
     """Two linked properties are listed in portal order."""
-    install_account_mocks(
-        mock_responses, [(ACCOUNT_A, LABEL_A), (ACCOUNT_B, LABEL_B)]
-    )
+    install_account_mocks(mock_responses, [(ACCOUNT_A, LABEL_A), (ACCOUNT_B, LABEL_B)])
 
     accounts = await ista_main_client.list_accounts()
 

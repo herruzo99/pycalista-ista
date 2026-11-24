@@ -18,8 +18,8 @@ def invoice_row(invoice_id: str, day: int = 1) -> str:
     return (
         f"<tr><td>{day:02d}/02/2026</td><td>Radio agua fría</td>"
         f"<td>80,12 €</td>"
-        "<td><a href=\"GestionFacturacion.do?d-148657-e=2"
-        f"&idRecibo={invoice_id}&metodo=duplicarReciboIndividualCalista\">"
+        '<td><a href="GestionFacturacion.do?d-148657-e=2'
+        f'&idRecibo={invoice_id}&metodo=duplicarReciboIndividualCalista">'
         "PDF</a></td></tr>"
     )
 
@@ -106,7 +106,9 @@ def test_next_page_url_ignores_sort_links():
         '&metodo=listadoRecibos&metodo=buscarRecibos">Importe</a>'
     )
 
-    assert InvoiceParser().next_page_url(listing_html(pager=pager), FIRST_PAGE_URL) is None
+    assert (
+        InvoiceParser().next_page_url(listing_html(pager=pager), FIRST_PAGE_URL) is None
+    )
 
 
 def test_next_page_url_returns_none_on_last_page():
@@ -128,7 +130,9 @@ def test_next_page_url_returns_none_when_ambiguous():
         '&metodo=listadoRecibos&metodo=buscarRecibos">2</a>'
     )
 
-    assert InvoiceParser().next_page_url(listing_html(pager=pager), FIRST_PAGE_URL) is None
+    assert (
+        InvoiceParser().next_page_url(listing_html(pager=pager), FIRST_PAGE_URL) is None
+    )
 
 
 def test_next_page_url_without_pager_returns_none():

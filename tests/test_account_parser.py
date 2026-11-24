@@ -9,7 +9,6 @@ LABEL_A = "Calle Mayor 1, 2ºA"
 LABEL_B = "Garaje Calle Mayor 1"
 
 
-
 def test_account_parser_ignores_separators_and_duplicate_ids():
     """Placeholders, separators and repeated IDs are not properties."""
     html = (
@@ -47,5 +46,3 @@ def test_account_parser_reads_selected_option():
     )
 
     assert AccountParser().selected_account_id(html) == ACCOUNT_B
-
-

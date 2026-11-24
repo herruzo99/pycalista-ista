@@ -12,9 +12,7 @@ from tests.conftest import TEST_EMAIL, TEST_PASSWORD, mock_login_success
 
 pytestmark = pytest.mark.asyncio
 
-FIRST_PAGE_PATTERN = re.compile(
-    re.escape(INVOICES_URL) + r"\?metodo=buscarRecibos"
-)
+FIRST_PAGE_PATTERN = re.compile(re.escape(INVOICES_URL) + r"\?metodo=buscarRecibos")
 PAGE_PATTERN = re.compile(
     r"https://oficina\.ista\.es/GesCon/GestionFacturacion\.do\?.*d-148657-p=\d+.*"
 )
@@ -26,8 +24,8 @@ def invoice_row(invoice_id: str, day: int = 1) -> str:
     return (
         f"<tr><td>{day:02d}/02/2026</td><td>Radio agua fría</td>"
         f"<td>80,12 €</td>"
-        "<td><a href=\"GestionFacturacion.do?d-148657-e=2"
-        f"&idRecibo={invoice_id}&metodo=duplicarReciboIndividualCalista\">"
+        '<td><a href="GestionFacturacion.do?d-148657-e=2'
+        f'&idRecibo={invoice_id}&metodo=duplicarReciboIndividualCalista">'
         "PDF</a></td></tr>"
     )
 
@@ -67,9 +65,7 @@ async def test_get_invoices_single_page(
     ista_api_client: VirtualApi, mock_responses: aioresponses
 ):
     """A listing without paging anchors is read once."""
-    mock_page_responses(
-        mock_responses, [listing_html(rows=invoice_row("AAA111"))]
-    )
+    mock_page_responses(mock_responses, [listing_html(rows=invoice_row("AAA111"))])
 
     invoices = await ista_api_client.get_invoices()
 
