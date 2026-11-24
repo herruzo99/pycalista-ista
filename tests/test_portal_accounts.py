@@ -452,3 +452,37 @@ async def test_concurrent_login_does_not_skip_its_own_selection(
 
     assert len(state["switches"]) == 2
     assert client.account_id == ACCOUNT_B
+
+
+async def test_manual_failed_selection_clears_the_reported_property(
+    mock_aiohttp_session, mock_responses: aioresponses
+):
+    """A manual selection that fails reports None, not the previous property.
+
+    R1: select_account() applied a new property, the portal ignored the
+    switch, and account_id still reported the property selected before the
+    call. The requested property must also survive, so a relogin restores it.
+    """
+    state = install_account_mocks(
+        mock_responses, [(ACCOUNT_A, LABEL_A), (ACCOUNT_B, LABEL_B)]
+    )
+    mock_login_success(mock_responses)
+    client = PyCalistaIsta(
+        email=TEST_EMAIL,
+        password=TEST_PASSWORD,
+        session=mock_aiohttp_session,
+        account_id=ACCOUNT_A,
+    )
+    assert await client.login() is True
+    assert client.account_id == ACCOUNT_A
+
+    # The portal ignores the manual switch to ACCOUNT_B.
+    state["apply_switch"] = False
+    with pytest.raises(IstaApiError):
+        await client.select_account(ACCOUNT_B)
+    assert client.account_id is None
+
+    # A relogin restores the requested property, ACCOUNT_A.
+    state["apply_switch"] = True
+    assert await client._virtual_api.relogin() is True
+    assert client.account_id == ACCOUNT_A

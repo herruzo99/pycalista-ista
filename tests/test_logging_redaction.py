@@ -10,7 +10,7 @@ from aioresponses import CallbackResult, aioresponses
 from yarl import URL
 
 from pycalista_ista import PyCalistaIsta
-from pycalista_ista.const import DATA_URL
+from pycalista_ista.const import CONSUMPTION_URL, DATA_URL, INVOICES_URL
 from pycalista_ista.exception_classes import (
     IstaApiError,
     IstaConnectionError,
@@ -382,3 +382,117 @@ async def test_undecodable_readings_body_logs_no_property_data(
     assert PROPERTY_ID.encode() not in caplog.text.encode()
     assert PROPERTY_LABEL.encode() not in caplog.text.encode()
     assert "Response signature (first 16 bytes, hex)" in caplog.text
+
+
+SECRET_PROPERTY_PARAM = "Zq7-secret-property-param"
+
+EXPORT_ANCHOR = (
+    '<a href="GestionFacturacion.do?d-148657-e=1'
+    f'&param={SECRET_PROPERTY_PARAM}&6578706f7274=1">Excel</a>'
+)
+EXPORT_URL_PATTERN = re.compile(
+    r"https://oficina\.ista\.es/.*GestionFacturacion\.do\?.*6578706f7274=1.*"
+)
+
+
+async def test_invoice_export_url_log_masks_the_property_param(
+    mock_aiohttp_session, mock_responses: aioresponses, caplog
+):
+    """R2: the invoice export URL is logged without its property parameter."""
+    caplog.set_level(logging.DEBUG)
+    mock_responses.get(
+        re.compile(re.escape(INVOICES_URL) + r".*metodo=buscarRecibos.*"),
+        status=200,
+        body=f"<html><body>{EXPORT_ANCHOR}</body></html>".encode(),
+        repeat=True,
+    )
+    mock_responses.get(
+        EXPORT_URL_PATTERN,
+        status=200,
+        headers={"Content-Type": "application/vnd.ms-excel"},
+        body=b"not a workbook",
+        repeat=True,
+    )
+    client = VirtualApi(
+        username=TEST_EMAIL, password=SECRET_PASSWORD, session=mock_aiohttp_session
+    )
+
+    with pytest.raises(IstaApiError):
+        await client.get_invoice_xls()
+
+    export_lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "invoice XLS export URL" in record.getMessage()
+    ]
+    assert export_lines, "expected the export URL debug log"
+    assert SECRET_PROPERTY_PARAM not in caplog.text
+    assert MASKED_VALUE in export_lines[0]
+
+
+async def test_billed_export_url_log_masks_the_property_param(
+    mock_aiohttp_session, mock_responses: aioresponses, caplog
+):
+    """R2: the billed export URL is logged without its property parameter."""
+    caplog.set_level(logging.DEBUG)
+    mock_responses.get(
+        re.compile(re.escape(CONSUMPTION_URL) + r".*metodo=buscarLecturas.*"),
+        status=200,
+        body=b"<html>preload</html>",
+        repeat=True,
+    )
+    mock_responses.post(
+        re.compile(re.escape(CONSUMPTION_URL) + r".*metodo=buscarLecturas.*"),
+        status=200,
+        body=f"<html><body>{EXPORT_ANCHOR}</body></html>".encode(),
+        repeat=True,
+    )
+    mock_responses.get(
+        EXPORT_URL_PATTERN,
+        status=200,
+        headers={"Content-Type": "application/vnd.ms-excel"},
+        body=b"not a workbook",
+        repeat=True,
+    )
+    client = VirtualApi(
+        username=TEST_EMAIL, password=SECRET_PASSWORD, session=mock_aiohttp_session
+    )
+
+    with pytest.raises(IstaApiError):
+        await client.get_billed_consumption()
+
+    export_lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "billed consumption export URL" in record.getMessage()
+    ]
+    assert export_lines, "expected the export URL debug log"
+    assert SECRET_PROPERTY_PARAM not in caplog.text
+    assert MASKED_VALUE in export_lines[0]
+
+
+async def test_connection_error_message_masks_sensitive_query_values(
+    mock_aiohttp_session, mock_responses: aioresponses, caplog
+):
+    """The raised error and its log line do not repeat a sensitive query value.
+
+    A connection error carries the request URL in its own text, and consumers
+    log library exceptions, so that text is masked as well.
+    """
+    caplog.set_level(logging.DEBUG)
+    url = f"https://oficina.ista.es/GesCon/GestionFacturacion.do?param={SECRET_PROPERTY_PARAM}"
+    mock_responses.get(
+        re.compile(re.escape(url) + r".*"),
+        exception=aiohttp.ClientConnectionError(f"Connection refused: GET {url}"),
+        repeat=True,
+    )
+    client = VirtualApi(
+        username=TEST_EMAIL, password=SECRET_PASSWORD, session=mock_aiohttp_session
+    )
+
+    with pytest.raises(IstaConnectionError) as error:
+        await client._send_request("GET", url, retry_attempts=0)
+
+    assert "Connection refused" in str(error.value)
+    assert SECRET_PROPERTY_PARAM not in str(error.value)
+    assert SECRET_PROPERTY_PARAM not in caplog.text

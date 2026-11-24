@@ -408,13 +408,19 @@ class VirtualApi:
                 return await self._send_request(
                     method, url, retry_attempts - 1, relogin=relogin, **kwargs
                 )
+            # The exception text repeats the request URL, so mask it there too.
+            # Consumers log library exceptions, and the URL can carry a
+            # sensitive query value such as the opaque property ID.
+            safe_error = _redact_sensitive_pairs(str(err))
             _LOGGER.error(
                 "Request to %s failed after all retries due to %s: %s",
                 _redact_url(url),
                 type(err).__name__,
-                err,
+                safe_error,
             )
-            raise IstaConnectionError(f"Request failed after retries: {err}") from err
+            raise IstaConnectionError(
+                f"Request failed after retries: {safe_error}"
+            ) from err
 
     async def relogin(self) -> bool:
         """Perform a fresh login, clearing old session state if necessary.
@@ -808,6 +814,12 @@ class VirtualApi:
         """
         if not account_id or not account_id.strip():
             raise IstaApiError("Account ID must be a non-empty string")
+
+        # The session selection is unknown until the portal confirms it. Clear
+        # the verified property first, so a failed switch cannot report the
+        # property that was selected before the call. The requested property
+        # stays, so a relogin can restore it.
+        self._account_id = None
 
         async with self._account_lock:
             self._selecting_task = asyncio.current_task()
@@ -1545,7 +1557,7 @@ class VirtualApi:
         # 2. Find export link, fall back to known URL if not found
         export_url = self._find_export_url(html, url_fragment="GestionFacturacion")
         if export_url:
-            _LOGGER.debug("Found invoice XLS export URL: %s", export_url)
+            _LOGGER.debug("Found invoice XLS export URL: %s", _redact_url(export_url))
         else:
             _LOGGER.warning(
                 "Could not find invoice XLS export link in HTML; using fallback URL."
@@ -1666,7 +1678,9 @@ class VirtualApi:
                 "Could not find Excel export link in billed consumption page. "
                 "The page structure may have changed."
             )
-        _LOGGER.debug("Found billed consumption export URL: %s", export_url)
+        _LOGGER.debug(
+            "Found billed consumption export URL: %s", _redact_url(export_url)
+        )
 
         # 4. Download and parse the XLS
         try:
