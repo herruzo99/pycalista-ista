@@ -146,3 +146,25 @@ def test_parse_skips_rows_without_serial():
 
     assert len(readings) == 2
     assert all(r.serial_number != "_" for r in readings)
+
+
+def test_decimal_comma_and_thousands_separator():
+    """A Spanish-locale cell ('1.234,5') parses as 1234.5."""
+    row = list(ROWS[0])
+    row[7] = "1.234,5"   # lectura anterior
+    row[8] = "1.240,5"   # lectura actual
+    row[9] = "6,0"       # consumo
+    parser = ConsumptionParser()
+    readings = parser.parse(_make_xls(OLD_HEADERS, [tuple(row)]))
+    assert len(readings) == 1
+    assert readings[0].previous_reading == 1234.5
+    assert readings[0].current_reading == 1240.5
+    assert readings[0].consumption == 6.0
+
+
+def test_empty_numeric_cell_drops_the_row():
+    """A blank or NaN reading is not a zero: the row is skipped."""
+    row = list(ROWS[0])
+    row[8] = None        # lectura actual sin valor
+    parser = ConsumptionParser()
+    assert parser.parse(_make_xls(OLD_HEADERS, [tuple(row)])) == []

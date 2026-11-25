@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.1] - 2026-11-25
+
+### Fixed
+- **Billed consumption with a decimal comma**: the export is served in Spanish locale, so `8,5` and `1.234,56` now parse instead of raising and dropping the row.
+- **Empty cells are not zeros**: a blank or NaN reading drops the row instead of storing a made-up reading.
+
+Both come from the fork maintained by @macanakin (github.com/macanakin/ista-calista, MIT), which hit the same two edge cases in the live export.
+
 ## [0.10.0] - 2026-11-24
 
 ### Added

@@ -8,6 +8,7 @@ so parsing is straightforward.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timezone
 from typing import IO, Final
 
@@ -48,6 +49,30 @@ _REQUIRED_COLS: Final[frozenset[str]] = frozenset(
         _COL_CONSUMPTION,
     }
 )
+
+
+def _parse_number(value: object) -> float | None:
+    """Return a number from an export cell, or None when it carries no value.
+
+    The portal serves the export in Spanish locale, so a decimal comma arrives
+    as ``8,5`` and thousands as ``1.234,56``. A blank or NaN cell is not a zero:
+    the row is dropped instead of inventing a reading. Idea taken from
+    @macanakin's fork (github.com/macanakin/ista-calista, MIT).
+    """
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, str):
+        text = value.strip().replace("\u00a0", "").replace(" ", "")
+        if not text:
+            return None
+        if "," in text:
+            text = text.replace(".", "").replace(",", ".")
+        value = text
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
 
 
 class ConsumptionParser:
@@ -132,6 +157,12 @@ class ConsumptionParser:
                 # pandas may parse it as a datetime already
                 reading_date = pd.Timestamp(date_val).date()
 
+            previous = _parse_number(row.get(_COL_PREV))
+            current = _parse_number(row.get(_COL_CURR))
+            consumption = _parse_number(row.get(_COL_CONSUMPTION))
+            if previous is None or current is None or consumption is None:
+                return None
+
             reading_id_raw = row.get(_COL_ID, 0)
             reading_id = int(reading_id_raw) if not pd.isna(reading_id_raw) else 0
 
@@ -155,9 +186,9 @@ class ConsumptionParser:
                     if not pd.isna(row.get(_COL_UNIT, ""))
                     else ""
                 ),
-                previous_reading=float(row.get(_COL_PREV, 0) or 0),
-                current_reading=float(row.get(_COL_CURR, 0) or 0),
-                consumption=float(row.get(_COL_CONSUMPTION, 0) or 0),
+                previous_reading=previous,
+                current_reading=current,
+                consumption=consumption,
             )
         except Exception as err:
             _LOGGER.warning("Skipping billed reading row due to error: %s", err)
