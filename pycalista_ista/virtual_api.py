@@ -14,7 +14,7 @@ import re
 from datetime import date, timedelta
 from html.parser import HTMLParser
 from typing import Any, Final
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import aiohttp
 from aiohttp import ClientError, ClientResponseError, ClientSession
@@ -86,9 +86,31 @@ MASKED_VALUE: Final[str] = "***(hidden)"
 ACCOUNT_SELECT_MARKER: Final[str] = "idAbonado"
 
 
+def _value_hides_sensitive_pair(value: object) -> bool:
+    """Return True when a value smuggles a sensitive ``key=value`` pair.
+
+    The portal carries the property ID inside another parameter's value
+    (``d-148657-e=2¶m=<id>``), encoded as ``%C2%B6m%3D<id>``. Masking by key
+    name alone leaves that ID in the log.
+    """
+    if not isinstance(value, str):
+        return False
+    # "&para" in the source is the HTML entity for "¶", so the portal writes
+    # "&param=" as "¶m=". The pilcrow never belongs in a portal URL.
+    if "¶" in value or "%c2%b6" in value.lower():
+        return True
+    for text in (value, unquote(value)):
+        for key in SENSITIVE_KEYS:
+            if re.search(rf"(?:^|[^A-Za-z0-9_-]){re.escape(key)}\s*=", text, re.IGNORECASE):
+                return True
+    return False
+
+
 def _mask_value(key: str, value: object) -> object:
     """Return a loggable value for one query/form pair."""
     if isinstance(key, str) and key.lower() in SENSITIVE_KEYS:
+        return MASKED_VALUE
+    if _value_hides_sensitive_pair(value):
         return MASKED_VALUE
     return value
 
@@ -118,10 +140,7 @@ def _redact_url(url: object) -> str:
         return "<unparsable url>"
     if not parsed.query:
         return str(parsed)
-    pairs = [
-        (key, MASKED_VALUE if key.lower() in SENSITIVE_KEYS else value)
-        for key, value in parsed.query.items()
-    ]
+    pairs = [(key, _mask_value(key, value)) for key, value in parsed.query.items()]
     return str(parsed.with_query(pairs))
 
 

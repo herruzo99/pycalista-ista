@@ -203,6 +203,12 @@ async def test_redact_helpers_mask_sensitive_values():
     ]
     assert _redact_mapping("raw string body") == MASKED_VALUE
     assert _redact_mapping(None) is None
+
+    # The portal smuggles the property ID inside another parameter's value,
+    # encoded as %C2%B6m%3D<id>. Masking by key name alone leaves it in the log.
+    smuggled = "https://h/x.do?d-148657-e=2%C2%B6m%3DZq7-secret&6578706f7274=1"
+    assert "Zq7-secret" not in _redact_url(smuggled)
+    assert "Zq7-secret" not in str(_redact_mapping({"d-148657-e": "2¶m=Zq7-secret"}))
     assert _redact_response_snippet("<html>hola</html>") == "<html>hola</html>"
     assert (
         _redact_response_snippet('<select name="idAbonado">x</select>')
