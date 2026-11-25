@@ -168,3 +168,25 @@ def test_empty_numeric_cell_drops_the_row():
     row[8] = None        # lectura actual sin valor
     parser = ConsumptionParser()
     assert parser.parse(_make_xls(OLD_HEADERS, [tuple(row)])) == []
+
+
+def test_empty_consumption_is_derived_from_the_readings():
+    """An incidence row with both readings but no consumo is kept, not dropped."""
+    row = list(ROWS[0])
+    row[9] = None        # consumo vacío
+    parser = ConsumptionParser()
+    readings = parser.parse(_make_xls(OLD_HEADERS, [tuple(row)]))
+    assert len(readings) == 1
+    assert readings[0].consumption == readings[0].current_reading - readings[0].previous_reading
+
+
+def test_english_thousands_separator():
+    """'1,234.5' is one thousand two hundred, not one point two three four."""
+    row = list(ROWS[0])
+    row[7] = "1,234.5"
+    row[8] = "1,240.5"
+    row[9] = "6.0"
+    parser = ConsumptionParser()
+    readings = parser.parse(_make_xls(OLD_HEADERS, [tuple(row)]))
+    assert readings[0].previous_reading == 1234.5
+    assert readings[0].consumption == 6.0

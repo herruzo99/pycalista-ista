@@ -65,8 +65,14 @@ def _parse_number(value: object) -> float | None:
         text = value.strip().replace("\u00a0", "").replace(" ", "")
         if not text:
             return None
-        if "," in text:
-            text = text.replace(".", "").replace(",", ".")
+        if "," in text and "." in text:
+            # Both separators: the last one is the decimal one.
+            if text.rfind(",") > text.rfind("."):
+                text = text.replace(".", "").replace(",", ".")
+            else:
+                text = text.replace(",", "")
+        elif "," in text:
+            text = text.replace(",", ".")
         value = text
     try:
         number = float(value)
@@ -160,8 +166,13 @@ class ConsumptionParser:
             previous = _parse_number(row.get(_COL_PREV))
             current = _parse_number(row.get(_COL_CURR))
             consumption = _parse_number(row.get(_COL_CONSUMPTION))
-            if previous is None or current is None or consumption is None:
+            if previous is None or current is None:
                 return None
+            if consumption is None:
+                # An incidence row can leave "consumo" empty while both readings
+                # are there. Deriving it keeps the billed reading instead of
+                # losing it, and a drop means a new meter cycle.
+                consumption = current - previous if current >= previous else current
 
             reading_id_raw = row.get(_COL_ID, 0)
             reading_id = int(reading_id_raw) if not pd.isna(reading_id_raw) else 0
