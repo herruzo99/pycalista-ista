@@ -36,7 +36,12 @@ class Device:
         ```
     """
 
-    def __init__(self, serial_number: str, location: str | None = None) -> None:
+    def __init__(
+        self,
+        serial_number: str,
+        location: str | None = None,
+        unit: str | None = None,
+    ) -> None:
         """Initialize a device.
 
         Args:
@@ -51,6 +56,9 @@ class Device:
 
         self.serial_number: str = serial_number
         self.location: str = location or ""
+        # Unit as the portal writes it ("UN", "m3", "kWh"). A heat cost allocator
+        # reports "UN": allocation units, not energy. Consumers decide how to show it.
+        self.unit: str = (unit or "").strip()
         self.history: list[Reading] = []
 
     def add_reading_value(self, reading_value: float | None, date: datetime) -> None:

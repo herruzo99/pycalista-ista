@@ -364,7 +364,8 @@ class ExcelParser:
             raise ValueError("Missing or empty device type in row.")
 
         # Create device instance based on normalized type
-        device = self._create_device(device_type_str, serial_number, location)
+        unit = str(row.get("unidad_medida", "") or "").strip()
+        device = self._create_device(device_type_str, serial_number, location, unit)
         if not device:
             # Log warning but allow skipping this row if type is unknown
             _LOGGER.warning(
@@ -388,6 +389,7 @@ class ExcelParser:
         normalized_device_type: str,
         serial_number: str,
         location: str,
+        unit: str = "",
     ) -> Device | None:
         """Creates the appropriate Device subclass based on the normalized type string.
 
@@ -401,11 +403,11 @@ class ExcelParser:
             ColdWaterDevice) or None if the type is not recognized.
         """
         if HEATING_TYPE_ID in normalized_device_type:
-            return HeatingDevice(serial_number, location)
+            return HeatingDevice(serial_number, location, unit)
         if HOT_WATER_TYPE_ID in normalized_device_type:
-            return HotWaterDevice(serial_number, location)
+            return HotWaterDevice(serial_number, location, unit)
         if COLD_WATER_TYPE_ID in normalized_device_type:
-            return ColdWaterDevice(serial_number, location)
+            return ColdWaterDevice(serial_number, location, unit)
 
         # Type not recognized
         return None

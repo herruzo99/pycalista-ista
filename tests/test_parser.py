@@ -354,3 +354,31 @@ def test_invoice_xls_parser_invalid_bytes():
 
     with pytest.raises(IstaParserError):
         InvoiceXlsParser().parse(BytesIO(b"not-an-excel-file"))
+
+
+def test_device_keeps_the_portal_unit():
+    """The reading export carries 'Unidad Medida'; the device stores it as-is."""
+    import io
+
+    import xlwt
+
+    from pycalista_ista.excel_parser import ExcelParser
+
+    wb = xlwt.Workbook()
+    ws = wb.add_sheet("Sheet1")
+    headers = ["Ubicacion", "Nº serie", "Tipo", "Unidad Medida", "01/01/25"]
+    for col, header in enumerate(headers):
+        ws.write(0, col, header)
+    ws.write(1, 0, "(1-Cocina1)")
+    ws.write(1, 1, 141740872)
+    ws.write(1, 2, "Radio Distribuidor de Costes de Calefacción")
+    ws.write(1, 3, "UN")
+    ws.write(1, 4, "73,514")
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    devices = ExcelParser(buf, current_year=2025).get_devices_history()
+    assert len(devices) == 1
+    device = next(iter(devices.values()))
+    assert device.unit == "UN"

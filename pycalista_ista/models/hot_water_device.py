@@ -25,7 +25,12 @@ class HotWaterDevice(WaterDevice):
         ```
     """
 
-    def __init__(self, serial_number: str, location: str | None = None) -> None:
+    def __init__(
+        self,
+        serial_number: str,
+        location: str | None = None,
+        unit: str | None = None,
+    ) -> None:
         """Initialize a hot water meter.
 
         Args:
@@ -35,7 +40,7 @@ class HotWaterDevice(WaterDevice):
         Raises:
             ValueError: If serial_number is empty
         """
-        super().__init__(serial_number, location)
+        super().__init__(serial_number, location, unit)
 
     def __repr__(self) -> str:
         """Get string representation of the hot water meter.

@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.0] - 2026-11-25
+
+### Added
+- **The unit the portal reports is kept**: `Device.unit` carries the `Unidad Medida` column of the readings export (`UN` for a heat cost allocator, `m3` or `kWh` otherwise). Consumers can show the real unit instead of assuming kWh.
+
+This is what lets the integration stop labelling allocation units as energy.
+
 ## [0.10.1] - 2026-11-25
 
 ### Fixed
