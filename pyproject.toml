@@ -33,6 +33,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    # aioresponses 0.7.x builds aiohttp.ClientResponse with the pre-3.13
+    # signature; CI installs the newest aiohttp and every mocked response fails.
+    "aiohttp<3.13",
     "aioresponses",
     "pytest",
     "pytest-cov",
